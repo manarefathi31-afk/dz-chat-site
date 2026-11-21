@@ -1,15 +1,4 @@
 <!DOCTYPE html>
-<html lang="en">
-
-  <head>
-    <meta charset="UTF-8">
-    <title>DZ-CHAT</title>
-    <link rel="stylesheet" href="./style.css">
-
-  </head>
-    
-  <body>
-  <!DOCTYPE html>
 <html lang="ar">
   <head>
     <meta charset="UTF-8">
@@ -34,7 +23,6 @@
           <div class="video-feed" id="videoFeed"></div>
         </section>
 
-        <!-- خانة الأصدقاء (مثل تيك توك - تعرض منشورات الأصدقاء) -->
         <section class="page" id="discoverPage">
           <div class="friends-topbar">
             <div class="friends-top-avatars" id="friendsTopAvatars"></div>
@@ -141,7 +129,6 @@
       </nav>
     </div>
 
-    <!-- نافذة البحث عن الأصدقاء والمنشورات -->
     <div id="dzSearchModal" dir="rtl" hidden>
       <div class="search-sheet-top">
         <button type="button" class="follows-back-btn" id="searchCloseBtn">→</button>
@@ -150,7 +137,6 @@
       <div class="search-sheet-body" id="discoverResults"></div>
     </div>
 
-    <!-- صفحة بروفايل الصديق (مثل الصور 5 و 6) -->
     <div id="dzUserProfileModal" dir="rtl" hidden>
       <div class="follows-topbar">
         <button type="button" class="follows-back-btn" id="userProfBackBtn">→</button>
@@ -203,7 +189,6 @@
       </div>
     </div>
 
-    <!-- صفحة المحادثة الخاصة -->
     <div id="dzChatRoom" dir="rtl" hidden>
       <div class="dm-topbar">
         <div class="dm-top-right">
@@ -218,6 +203,16 @@
           <button type="button" class="dm-head-icon" id="chatCallBtn" title="غرفة لايف">📞</button>
           <button type="button" class="dm-head-icon" id="chatMoreBtn" title="خيارات">•••</button>
         </div>
+      </div>
+
+      <div class="dm-search-bar" id="chatSearchBar" hidden>
+        <input id="chatSearchInput" type="text" placeholder="ابحث داخل هذه المحادثة...">
+        <button type="button" id="chatSearchCloseBtn">✕</button>
+      </div>
+
+      <div class="dm-blocked-banner" id="chatBlockedBanner" hidden>
+        <span>🚫 لقد قمت بحظر هذا الحساب.</span>
+        <button type="button" id="chatUnblockQuickBtn">إلغاء الحظر</button>
       </div>
 
       <div class="dm-messages" id="chatMessages"></div>
@@ -265,7 +260,94 @@
       </form>
     </div>
 
-    <!-- نافذة المتابعين / أتابعه / الأصدقاء -->
+    <!-- صفحة إعدادات الخاص (النقاط الثلاث) -->
+    <div id="dzChatSettingsModal" dir="rtl" hidden>
+      <div class="cs-topbar">
+        <button type="button" class="cs-icon-btn" id="csMoreDotBtn">•••</button>
+        <button type="button" class="cs-icon-btn" id="csBackBtn">›</button>
+      </div>
+      <div class="cs-scroll">
+        <div class="cs-hero">
+          <div class="cs-avatar" id="csAvatar">🇩🇿</div>
+          <div class="cs-name-row">
+            <strong id="csDisplayName">صديق</strong>
+            <span class="cs-verified-badge">✓</span>
+          </div>
+        </div>
+        <div class="cs-quick-actions">
+          <button type="button" class="cs-qbtn" id="csSearchChatBtn">
+            <span>🔍</span>
+            <small>بحث</small>
+          </button>
+          <button type="button" class="cs-qbtn" id="csViewProfileBtn">
+            <span>👤</span>
+            <small>عرض الملف الشخصي</small>
+          </button>
+          <button type="button" class="cs-qbtn" id="csCreateGroupBtn">
+            <span>👥</span>
+            <small>إنشاء مجموعة</small>
+          </button>
+        </div>
+        <div class="cs-list">
+          <label class="cs-row">
+            <div class="cs-row-r">
+              <span class="cs-row-ico">🔔</span>
+              <span>متابعة كل إشعارات الحساب</span>
+            </div>
+            <input type="checkbox" class="cs-switch" id="csToggleNotifyAll">
+          </label>
+          <label class="cs-row">
+            <div class="cs-row-r">
+              <span class="cs-row-ico">🔕</span>
+              <span>حظر الرسائل</span>
+            </div>
+            <input type="checkbox" class="cs-switch" id="csToggleMuteMsgs">
+          </label>
+          <label class="cs-row">
+            <div class="cs-row-r">
+              <span class="cs-row-ico">📞</span>
+              <span>كتم المكالمات</span>
+            </div>
+            <input type="checkbox" class="cs-switch" id="csToggleMuteCalls">
+          </label>
+          <label class="cs-row">
+            <div class="cs-row-r">
+              <span class="cs-row-ico">⬆️</span>
+              <span>التثبيت في الأعلى</span>
+            </div>
+            <input type="checkbox" class="cs-switch" id="csTogglePin">
+          </label>
+          <button type="button" class="cs-row cs-danger-row" id="csBlockAccountBtn">
+            <div class="cs-row-r">
+              <span class="cs-row-ico">🚫</span>
+              <span id="csBlockAccountText">حظر الحساب</span>
+            </div>
+            <span class="cs-chevron">‹</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- نافذة صغيرة للضغط المطول على الرسالة (تعديل / حذف / تفاعل) -->
+    <div id="dzMsgActionModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card msg-action-card">
+        <div class="msg-react-bar" id="msgReactBar">
+          <button type="button" data-react="❤️">❤️</button>
+          <button type="button" data-react="😂">😂</button>
+          <button type="button" data-react="🔥">🔥</button>
+          <button type="button" data-react="👏">👏</button>
+          <button type="button" data-react="🇩🇿">🇩🇿</button>
+        </div>
+        <div id="msgEditSection" hidden>
+          <input id="msgEditInput" type="text" placeholder="عدّل رسالتك...">
+          <button type="button" id="msgEditSaveBtn">حفظ التعديل ✅</button>
+        </div>
+        <button type="button" id="msgCopyBtn" style="background:#0f172a;">📋 نسخ النص</button>
+        <button type="button" id="msgDeleteBtn" class="choice-live-btn" hidden>🗑️ حذف الرسالة</button>
+        <button type="button" id="msgActionCloseBtn" class="modal-cancel-btn">إغلاق</button>
+      </div>
+    </div>
+
     <div id="dzFollowsModal" dir="rtl" hidden>
       <div class="follows-topbar">
         <button type="button" class="follows-back-btn" id="followsBackBtn">→</button>
@@ -347,7 +429,18 @@
         </div>
         <div class="live-action-controls" id="liveActionControls"></div>
       </div>
-      <div id="liveAudioPool" hidden></div>
+      <div id="liveAudioPool" class="live-audio-pool"></div>
+    </div>
+
+    <!-- نافذة خيارات المقعد (تظهر عند الضغط على المقعد) -->
+    <div id="dzSeatActionModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card seat-action-card">
+        <div class="comments-header">
+          <h2 id="seatActionTitle">خيارات المقعد</h2>
+          <button type="button" class="close-x" id="dzCloseSeatAction">✕</button>
+        </div>
+        <div id="seatActionButtons" class="seat-action-btns"></div>
+      </div>
     </div>
 
     <div id="dzLiveSettingsModal" class="dz-modal-overlay" dir="rtl" hidden>
@@ -509,9 +602,4 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./script.js"></script>
   </body>
-</html>
-    <script src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'></script><script  src="./script.js"></script>
-
-  </body>
-  
 </html>
