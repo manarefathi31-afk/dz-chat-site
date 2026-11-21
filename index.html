@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+
+  <head>
+    <meta charset="UTF-8">
+    <title>DZ-CHAT</title>
+    <link rel="stylesheet" href="./style.css">
+
+  </head>
+    
+  <body>
+  <!DOCTYPE html>
+<html lang="ar">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#000000">
+    <title>DZ-CHAT</title>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <div class="app page-homePage" dir="rtl">
+      <header class="topbar" id="mainTopbar">
+        <div class="brand">
+          <span class="flag">🇩🇿</span>
+          <div><strong>DZ-CHAT</strong><small>تواصل بلا حدود</small></div>
+        </div>
+        <button type="button" class="icon-btn" id="searchBtn">⌕</button>
+      </header>
+
+      <main>
+        <section class="page active" id="homePage">
+          <div class="live-rooms-strip" id="liveRoomsStrip" hidden></div>
+          <div class="video-feed" id="videoFeed"></div>
+        </section>
+
+        <!-- خانة الأصدقاء (مثل تيك توك - تعرض منشورات الأصدقاء) -->
+        <section class="page" id="discoverPage">
+          <div class="friends-topbar">
+            <div class="friends-top-avatars" id="friendsTopAvatars"></div>
+            <strong>الأصدقاء</strong>
+            <button type="button" class="icon-btn" id="friendsSearchOpenBtn">⌕</button>
+          </div>
+          <div class="video-feed" id="friendsFeed"></div>
+        </section>
+
+        <section class="page light-page" id="uploadPage">
+          <h2>نشر صورة أو فيديو</h2>
+          <div class="upload-box">
+            <div class="upload-icon">＋</div>
+            <h3>شارك لحظاتك مع أصدقائك</h3>
+            <p>اختر صورة أو فيديو من هاتفك لنشره للجميع.</p>
+            <label class="upload-button" for="videoFile">اختيار صورة أو فيديو</label>
+            <input type="file" id="videoFile" accept="video/*,image/*" hidden>
+            <div id="uploadStatus"></div>
+            <div class="upload-preview" id="uploadPreview" hidden></div>
+            <input class="caption-input" id="newCaption" placeholder="اكتب وصفاً للمنشور...">
+            <button type="button" class="publish-button" id="publishBtn">نشر الآن</button>
+          </div>
+        </section>
+
+        <section class="page light-page" id="messagesPage">
+          <div class="inbox-topbar">
+            <button type="button" class="inbox-top-icon" id="inboxOpenDiscoverBtn" title="إضافة أصدقاء">👤＋</button>
+            <div class="inbox-title-wrap">
+              <div class="inbox-mini-stack" id="inboxMiniStack"></div>
+              <strong>صندوق الوارد</strong>
+              <button type="button" class="inbox-status-pill" id="inboxStatusToggle" title="حالة النشاط">
+                <i class="dot-online" id="myStatusDot"></i>▾
+              </button>
+            </div>
+            <button type="button" class="inbox-top-icon" id="inboxSearchBtn" title="بحث">⌕</button>
+          </div>
+          <div class="inbox-stories-strip" id="inboxStoriesStrip"></div>
+          <div class="inbox-chats-list" id="inboxChatsList"></div>
+        </section>
+
+        <section class="page light-page" id="profilePage">
+          <div class="profile-topbar">
+            <div class="profile-top-right">
+              <button type="button" class="profile-icon-btn" id="profileMenuBtn" title="القائمة">☰</button>
+              <button type="button" class="profile-icon-btn" id="profileAddFriendBtn" title="الأصدقاء">👤＋</button>
+            </div>
+            <button type="button" class="profile-icon-btn" id="profileTopEditBtn" title="تعديل الحساب">✎</button>
+          </div>
+
+          <div class="profile-hero">
+            <div class="profile-avatar-block">
+              <button type="button" class="thought-bubble" id="profileThoughtBubble">
+                <span id="profileThoughtText">ماذا يدور في ذهنك؟</span>
+              </button>
+              <div class="profile-avatar-wrap">
+                <div class="profile-avatar-circle" id="profileAvatar">🇩🇿</div>
+                <button type="button" class="profile-plus-badge" id="profilePlusBtn" title="تعديل">＋</button>
+              </div>
+            </div>
+            <div class="profile-identity">
+              <h2 id="profileDisplayName">عضو DZ-CHAT</h2>
+              <span class="profile-handle" id="profileName">@dz_user</span>
+            </div>
+          </div>
+
+          <div class="profile-stats-row">
+            <button type="button" class="stat-col" id="statFollowingBtn">
+              <strong id="statFollowing">0</strong>
+              <small>أتابعه</small>
+            </button>
+            <button type="button" class="stat-col" id="statFollowersBtn">
+              <strong id="statFollowers">0</strong>
+              <small>متابعين</small>
+            </button>
+            <div class="stat-col">
+              <strong id="statLikes">0</strong>
+              <small>تسجيلات الإعجاب</small>
+            </div>
+          </div>
+
+          <div class="profile-bio-wrap">
+            <button type="button" class="profile-bio-pill" id="profileBioBtn">
+              <span id="profileBio">＋ إضافة سيرة ذاتية</span>
+            </button>
+            <p class="profile-country-line" id="profileCountry"></p>
+          </div>
+
+          <div class="profile-tabs-bar">
+            <button type="button" class="profile-tab active" id="profileTabPosts" data-tab="posts" title="منشوراتي">☷</button>
+            <button type="button" class="profile-tab" id="profileTabSaved" data-tab="saved" title="المحفوظات">🔖</button>
+            <button type="button" class="profile-tab" id="profileTabLikes" data-tab="likes" title="الإعجابات">♡</button>
+          </div>
+
+          <div class="profile-grid" id="myVideosList"></div>
+        </section>
+      </main>
+
+      <nav class="bottom-nav" id="bottomNav">
+        <button type="button" class="nav-item active" data-page="homePage"><span>⌂</span><small>الرئيسية</small></button>
+        <button type="button" class="nav-item" data-page="discoverPage"><span>👥</span><small>الأصدقاء</small></button>
+        <button type="button" class="nav-item create-nav" data-page="uploadPage"><span>＋</span></button>
+        <button type="button" class="nav-item" data-page="messagesPage"><span class="nav-ico-wrap">💬<i class="nav-badge" id="inboxNavBadge" hidden>0</i></span><small>صندوق الوارد</small></button>
+        <button type="button" class="nav-item" data-page="profilePage"><span>👤</span><small>الملف الشخصي</small></button>
+      </nav>
+    </div>
+
+    <!-- نافذة البحث عن الأصدقاء والمنشورات -->
+    <div id="dzSearchModal" dir="rtl" hidden>
+      <div class="search-sheet-top">
+        <button type="button" class="follows-back-btn" id="searchCloseBtn">→</button>
+        <input class="search-input" id="searchInput" placeholder="ابحث عن اسم صديق أو وصف منشور..." style="margin-bottom:0;flex:1;">
+      </div>
+      <div class="search-sheet-body" id="discoverResults"></div>
+    </div>
+
+    <!-- صفحة بروفايل الصديق (مثل الصور 5 و 6) -->
+    <div id="dzUserProfileModal" dir="rtl" hidden>
+      <div class="follows-topbar">
+        <button type="button" class="follows-back-btn" id="userProfBackBtn">→</button>
+        <div class="user-prof-top-actions">
+          <button type="button" class="profile-icon-btn" id="userProfBellBtn" title="إشعارات">🔔</button>
+          <button type="button" class="profile-icon-btn" id="userProfShareBtn" title="مشاركة">↪</button>
+        </div>
+      </div>
+
+      <div class="user-prof-scroll">
+        <div class="user-prof-header">
+          <div class="user-prof-av-ring" id="userProfAvatarWrap">
+            <div class="user-prof-av-in" id="userProfAvatar">🇩🇿</div>
+            <span class="story-live-badge" id="userProfLiveBadge" hidden>LIVE</span>
+          </div>
+          <div class="user-prof-names">
+            <h2 id="userProfDisplayName">عضو</h2>
+            <span class="profile-handle" id="userProfHandle">@user</span>
+          </div>
+        </div>
+
+        <div class="profile-stats-row">
+          <button type="button" class="stat-col" id="userProfFollowingBtn">
+            <strong id="userProfFollowingCount">0</strong>
+            <small>أتابعه</small>
+          </button>
+          <button type="button" class="stat-col" id="userProfFollowersBtn">
+            <strong id="userProfFollowersCount">0</strong>
+            <small>متابعين</small>
+          </button>
+          <div class="stat-col">
+            <strong id="userProfLikesCount">0</strong>
+            <small>تسجيلات الإعجاب</small>
+          </div>
+        </div>
+
+        <div class="user-prof-actions" id="userProfActionsRow"></div>
+
+        <div class="user-prof-bio-box">
+          <p id="userProfBio"></p>
+          <small id="userProfCountry"></small>
+        </div>
+
+        <div class="profile-tabs-bar" id="userProfTabs">
+          <button type="button" class="profile-tab active" data-utab="posts">☷</button>
+          <button type="button" class="profile-tab" data-utab="likes">♡</button>
+        </div>
+
+        <div class="profile-grid" id="userProfGrid"></div>
+      </div>
+    </div>
+
+    <!-- صفحة المحادثة الخاصة -->
+    <div id="dzChatRoom" dir="rtl" hidden>
+      <div class="dm-topbar">
+        <div class="dm-top-right">
+          <button type="button" class="dm-back-btn" id="chatBackBtn">›</button>
+          <div class="dm-user-avatar" id="chatHeaderAvatar">🇩🇿</div>
+          <div class="dm-user-meta" id="chatHeaderUserMeta">
+            <strong id="chatHeaderName">صديق</strong>
+            <small id="chatHeaderSub">نشط الآن</small>
+          </div>
+        </div>
+        <div class="dm-top-left">
+          <button type="button" class="dm-head-icon" id="chatCallBtn" title="غرفة لايف">📞</button>
+          <button type="button" class="dm-head-icon" id="chatMoreBtn" title="خيارات">•••</button>
+        </div>
+      </div>
+
+      <div class="dm-messages" id="chatMessages"></div>
+
+      <div class="dm-quick-bar" id="chatQuickBar">
+        <button type="button" class="dm-quick-chip" data-quick="heart">❤️</button>
+        <button type="button" class="dm-quick-chip" data-quick="share">🎬 مشاركة المنشور</button>
+        <button type="button" class="dm-quick-chip" data-quick="reply">⚡ الردود المحفوظة</button>
+      </div>
+
+      <div class="dm-emoji-bar" id="chatEmojiBar" hidden>
+        <button type="button" class="dm-emoji-item">😂</button>
+        <button type="button" class="dm-emoji-item">❤️</button>
+        <button type="button" class="dm-emoji-item">🇩🇿</button>
+        <button type="button" class="dm-emoji-item">🔥</button>
+        <button type="button" class="dm-emoji-item">🤲</button>
+        <button type="button" class="dm-emoji-item">👏</button>
+        <button type="button" class="dm-emoji-item">😍</button>
+        <button type="button" class="dm-emoji-item">👌</button>
+      </div>
+
+      <div class="dm-voice-bar" id="chatVoiceBar" hidden>
+        <button type="button" class="dm-voice-cancel" id="chatVoiceCancelBtn">إلغاء</button>
+        <div class="dm-voice-recording">
+          <span class="rec-dot"></span>
+          <span id="chatVoiceTimer">00:00</span>
+          <small>جارٍ التسجيل الصوتي...</small>
+        </div>
+        <button type="button" class="dm-voice-send" id="chatVoiceSendBtn">إرسال ➤</button>
+      </div>
+
+      <form class="dm-input-bar" id="chatForm">
+        <button type="button" class="dm-cam-btn" id="chatCamBtn" title="كاميرا">📷</button>
+        <div class="dm-pill-wrap">
+          <input id="chatInput" type="text" placeholder="رسالة..." autocomplete="off">
+          <div class="dm-pill-icons">
+            <button type="button" id="chatMicBtn" title="رسالة صوتية">🎙️</button>
+            <button type="button" id="chatGalleryBtn" title="صورة">🖼️</button>
+            <button type="button" id="chatEmojiBtn" title="رموز">😊</button>
+            <button type="submit" class="dm-send-icon" id="chatSendBtn" hidden>➤</button>
+          </div>
+        </div>
+        <input type="file" id="chatImgInput" accept="image/*" hidden>
+        <input type="file" id="chatCamInput" accept="image/*" capture="environment" hidden>
+      </form>
+    </div>
+
+    <!-- نافذة المتابعين / أتابعه / الأصدقاء -->
+    <div id="dzFollowsModal" dir="rtl" hidden>
+      <div class="follows-topbar">
+        <button type="button" class="follows-back-btn" id="followsBackBtn">→</button>
+        <strong id="followsHeaderUsername">@user</strong>
+        <button type="button" class="follows-add-btn" id="followsAddFriendBtn">👤＋</button>
+      </div>
+      <div class="follows-tabs" id="followsTabs">
+        <button type="button" class="follows-tab active" data-ftab="following">أتابعه <span id="ftabFollowingCount">0</span></button>
+        <button type="button" class="follows-tab" data-ftab="followers">متابعون <span id="ftabFollowersCount">0</span></button>
+        <button type="button" class="follows-tab" data-ftab="friends">الأصدقاء <span id="ftabFriendsCount">0</span></button>
+        <button type="button" class="follows-tab" data-ftab="suggested">مقترح</button>
+      </div>
+      <div class="follows-search-wrap">
+        <input id="followsSearchInput" type="text" placeholder="🔍 بحث بالاسم...">
+      </div>
+      <div class="follows-list" id="followsList"></div>
+    </div>
+
+    <div class="toast" id="toast" dir="rtl"></div>
+
+    <div id="dzCreateChoiceModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <h2>ماذا تريد أن تفعل؟</h2>
+        <button type="button" id="choiceUploadBtn">📸 نشر صورة أو فيديو</button>
+        <button type="button" id="choiceLiveBtn" class="choice-live-btn">📹 فتح بث مباشر / غرفة صوتية</button>
+        <button type="button" id="dzCloseChoice" class="modal-cancel-btn">إلغاء</button>
+      </div>
+    </div>
+
+    <div id="dzLiveSetupModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <h2>بدء البث المباشر 🔴</h2>
+        <label for="liveTitleInput">عنوان البث</label>
+        <input id="liveTitleInput" type="text" value="دردشة الأصدقاء لايف 🇩🇿" placeholder="مثال: دردشة مع الأصدقاء">
+        <label>نوع البث</label>
+        <div class="live-mode-picker">
+          <button type="button" id="liveModeVideo" class="mode-opt active">📹 فيديو + صوت</button>
+          <button type="button" id="liveModeAudio" class="mode-opt">🎙️ صوتي فقط</button>
+        </div>
+        <button type="button" id="startLiveConfirmBtn" class="choice-live-btn">بدء البث المباشر الآن</button>
+        <button type="button" id="dzCloseLiveSetup" class="modal-cancel-btn">إلغاء</button>
+      </div>
+    </div>
+
+    <div id="dzLiveRoom" dir="rtl" hidden>
+      <div class="live-topbar">
+        <div class="live-top-right-grp">
+          <button type="button" class="live-mini-icon-btn" id="liveSettingsBtn" title="خصائص الغرفة" hidden>⚙️</button>
+          <div class="live-host-pill">
+            <div class="live-host-avatar" id="liveHostAvatar">🇩🇿</div>
+            <div class="live-host-meta">
+              <strong id="liveRoomTitle">بث مباشر لايف</strong>
+              <small id="liveHostName">المضيف: @host</small>
+            </div>
+          </div>
+        </div>
+        <div class="live-top-actions">
+          <button type="button" class="live-req-toggle" id="liveReqToggleBtn" hidden>✋ (<span id="liveReqCount">0</span>)</button>
+          <button type="button" class="live-exit-btn" id="liveExitBtn">خروج</button>
+        </div>
+      </div>
+
+      <div class="live-requests-drawer" id="liveRequestsDrawer" hidden>
+        <h4>طلبات الصعود إلى المقاعد:</h4>
+        <div id="liveRequestsList"></div>
+      </div>
+
+      <div class="live-host-stage" id="liveHostStage" hidden></div>
+      <div class="live-seats-grid" id="liveGuestSeats"></div>
+      <div class="live-comments-area" id="liveCommentsArea"></div>
+
+      <div class="live-bottom-bar">
+        <div class="live-bottom-row">
+          <button type="button" class="live-mini-share-btn" id="liveShareBtn" title="مشاركة مع الأصدقاء">➤</button>
+          <form class="live-comment-form" id="liveCommentForm">
+            <input id="liveCommentInput" type="text" placeholder="اكتب تعليقاً في البث..." required>
+            <button type="submit">إرسال</button>
+          </form>
+        </div>
+        <div class="live-action-controls" id="liveActionControls"></div>
+      </div>
+      <div id="liveAudioPool" hidden></div>
+    </div>
+
+    <div id="dzLiveSettingsModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <div class="comments-header">
+          <h2>خصائص الغرفة ⚙️</h2>
+          <button type="button" class="close-x" id="dzCloseLiveSettings">✕</button>
+        </div>
+        <label>خلفية الغرفة</label>
+        <div class="live-bg-presets" id="liveBgPresets">
+          <button type="button" class="bg-swatch" data-bg="default" style="background:linear-gradient(180deg,#1d3557,#070b14)">أزرق</button>
+          <button type="button" class="bg-swatch" data-bg="emerald" style="background:linear-gradient(180deg,#064e3b,#041310)">زمردي</button>
+          <button type="button" class="bg-swatch" data-bg="purple" style="background:linear-gradient(180deg,#4c1d95,#11081f)">بنفسجي</button>
+          <button type="button" class="bg-swatch" data-bg="sunset" style="background:linear-gradient(180deg,#7c2d12,#1c0a09)">غروب</button>
+        </div>
+        <label class="upload-button" for="liveBgFile" style="text-align:center;margin:4px 0;">🖼️ اختيار خلفية من الصور</label>
+        <input type="file" id="liveBgFile" accept="image/*" hidden>
+        <label for="livePinInput">قفل الغرفة بمفتاح سري (4 أرقام - اتركه فارغاً للإلغاء)</label>
+        <input id="livePinInput" type="tel" maxlength="4" inputmode="numeric" placeholder="مثال: 1234">
+        <button type="button" id="liveSaveSettingsBtn">حفظ خصائص الغرفة ✅</button>
+        <hr style="border:0;border-top:1px solid #e5e7eb;margin:4px 0;">
+        <label>موسيقى أثناء اللايف 🎵</label>
+        <label class="upload-button" for="liveMusicFile" style="text-align:center;margin:2px 0;">🎵 اختيار مقطع موسيقى</label>
+        <input type="file" id="liveMusicFile" accept="audio/*" hidden>
+        <small id="liveMusicStatus" style="color:#07845b;font-size:12px;">لم يتم اختيار موسيقى</small>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button type="button" id="liveMusicToggleBtn" style="flex:1;background:#0f172a;" disabled>▶️ تشغيل / إيقاف</button>
+          <input type="range" id="liveMusicVol" min="0" max="1" step="0.05" value="0.4" style="flex:1;">
+        </div>
+      </div>
+    </div>
+
+    <div id="dzLiveShareModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <div class="comments-header">
+          <h2>مشاركة البث مع من تتابعهم ➤</h2>
+          <button type="button" class="close-x" id="dzCloseLiveShare">✕</button>
+        </div>
+        <p style="font-size:12px;color:#64748b;">اختر صديقاً لإرسال رابط دخول مباشر لبثك:</p>
+        <div class="live-share-friends-row" id="liveShareFriendsRow"></div>
+        <small id="liveShareStatus" style="color:#07845b;font-size:12px;text-align:center;"></small>
+      </div>
+    </div>
+
+    <div id="dzLivePinModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <div class="comments-header">
+          <h2>غرفة مقفلة 🔒</h2>
+          <button type="button" class="close-x" id="dzCloseLivePin">✕</button>
+        </div>
+        <p style="font-size:13px;color:#64748b;">أدخل المفتاح السري المكون من 4 أرقام للدخول:</p>
+        <input id="livePinAttemptInput" type="tel" maxlength="4" inputmode="numeric" placeholder="••••" style="text-align:center;font-size:20px;letter-spacing:8px;">
+        <div id="livePinErr" class="modal-error" hidden></div>
+        <button type="button" id="livePinSubmitBtn">دخول للغرفة 🔓</button>
+      </div>
+    </div>
+
+    <div id="dzPostOptionsModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <div class="comments-header">
+          <h2>خيارات المنشور</h2>
+          <button type="button" class="close-x" id="dzClosePostOptions">✕</button>
+        </div>
+        <button type="button" id="postOptEditBtn" hidden>✏️ تعديل المنشور (الوصف / الصورة / الفيديو)</button>
+        <button type="button" id="postOptDeleteBtn" class="choice-live-btn" hidden>🗑️ حذف المنشور</button>
+        <button type="button" id="postOptSaveBtn" style="background:#0f172a;">🔖 حفظ في المحفوظات</button>
+        <button type="button" id="postOptCopyBtn" style="background:#1c3048;">🔗 نسخ رابط المنشور</button>
+      </div>
+    </div>
+
+    <div id="dzEditPostModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <div class="comments-header">
+          <h2>تعديل المنشور ✏️</h2>
+          <button type="button" class="close-x" id="dzCloseEditPost">✕</button>
+        </div>
+        <label>تغيير الصورة أو الفيديو (اختياري)</label>
+        <div class="upload-preview" id="editPostPreview" hidden></div>
+        <label class="upload-button" for="editPostMediaFile" style="text-align:center;margin-bottom:4px;">📁 اختيار صورة أو فيديو جديد</label>
+        <input type="file" id="editPostMediaFile" accept="video/*,image/*" hidden>
+        <small id="editPostStatus" style="color:#07845b;font-size:12px;"></small>
+        <label for="editPostCaption">وصف المنشور</label>
+        <textarea id="editPostCaption" placeholder="اكتب الوصف الجديد للمنشور..."></textarea>
+        <button type="button" id="saveEditPostBtn">حفظ التعديلات ✅</button>
+      </div>
+    </div>
+
+    <div id="dzThoughtModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <div class="comments-header">
+          <h2>ماذا يدور في ذهنك؟ 💭</h2>
+          <button type="button" class="close-x" id="dzCloseThoughtBtn">✕</button>
+        </div>
+        <input id="dzThoughtInput" type="text" maxlength="60" placeholder="اكتب حالتك القصيرة...">
+        <button type="button" id="dzSaveThoughtBtn">حفظ الحالة</button>
+      </div>
+    </div>
+
+    <div id="dzProfileMenuModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <div class="comments-header">
+          <h2>إعدادات الحساب</h2>
+          <button type="button" class="close-x" id="dzCloseProfileMenu">✕</button>
+        </div>
+        <button type="button" id="menuEditProfileBtn">✎ تعديل الملف الشخصي</button>
+        <button type="button" id="menuCreateBtn" style="background:#0f172a;">➕ نشر منشور / فتح بث</button>
+        <button type="button" id="menuLogoutBtn" class="choice-live-btn">🚪 تسجيل الخروج</button>
+      </div>
+    </div>
+
+    <div id="dzProfileModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <h2>تعديل الملف الشخصي</h2>
+        <label for="dzEditAvatar">الصورة الشخصية</label>
+        <div id="dzAvatarPreview">🇩🇿</div>
+        <input id="dzEditAvatar" type="file" accept="image/*">
+        <label for="dzEditUsername">اسم المستخدم</label>
+        <input id="dzEditUsername" type="text" placeholder="اسم المستخدم">
+        <label for="dzEditBio">السيرة الذاتية</label>
+        <textarea id="dzEditBio" placeholder="اكتب نبذة عن نفسك"></textarea>
+        <label for="dzEditCountry">البلد</label>
+        <input id="dzEditCountry" type="text" placeholder="الجزائر">
+        <div id="dzProfileError" class="modal-error" hidden></div>
+        <button id="dzSaveProfile" type="button">حفظ التعديلات</button>
+        <button id="dzCloseProfile" type="button" class="modal-cancel-btn">إلغاء</button>
+      </div>
+    </div>
+
+    <div id="dzCommentsModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <div class="comments-header">
+          <h2>التعليقات 💬</h2>
+          <button type="button" class="close-x" id="dzCloseComments">✕</button>
+        </div>
+        <div id="commentsList" class="comments-list"></div>
+        <form id="commentForm" class="comment-form">
+          <input id="commentInput" type="text" placeholder="أضف تعليقاً..." required>
+          <button type="submit">نشر</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="dzShareModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <div class="comments-header">
+          <h2>مشاركة المنشور ➤</h2>
+          <button type="button" class="close-x" id="dzCloseShare">✕</button>
+        </div>
+        <button type="button" id="shareToPublicBtn">🌐 إرسال في شات الأصدقاء العام</button>
+        <label for="shareFriendSelect">أو إرسال لصديق محدد في الخاص:</label>
+        <select id="shareFriendSelect"></select>
+        <button type="button" id="shareToFriendBtn">✉️ إرسال للصديق المختار</button>
+        <label for="shareLinkInput">أو انسخ رابط المنشور:</label>
+        <input id="shareLinkInput" type="text" readonly>
+        <button type="button" id="shareExternalBtn" style="background:#1c3048;">🔗 نسخ / مشاركة خارجية</button>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./script.js"></script>
+  </body>
+</html>
+    <script src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'></script><script  src="./script.js"></script>
+
+  </body>
+  
+</html>
