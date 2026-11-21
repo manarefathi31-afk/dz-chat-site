@@ -17,17 +17,18 @@ let selectedMedia = null, selectedMediaType = "video";
 let activeCommentVideoId = null, activeSharePost = null, activeOptionsPost = null;
 let activeEditPost = null, editPostMediaFile = null, editPostMediaType = null;
 let activeChatUserId = "__none__", activeProfileTab = "posts", activeFollowsTab = "following";
-let viewedUserProfileId = null, viewedUserProfileTab = "posts";
+let viewedUserProfileId = null, viewedUserProfileTab = "posts", chatSearchQuery = "";
 let feedObserver = null, friendsFeedObserver = null;
 
 let activeLiveRoom = null, selectedLiveMode = "video", pendingPinRoom = null;
 let liveSeatsCache = [], liveCommentsCache = [], liveRoomChannel = null;
-let localMediaStream = null, peerConnections = {}, pendingIceCandidates = {}, amISpeakerNow = false;
+let localMediaStream = null, peerConnections = {}, pendingIceCandidates = {}, remoteMediaStreams = {}, amISpeakerNow = false;
 let myLiveSessionSeq = 1, knownLiveRoomIds = new Set(), initialRoomsLoaded = false;
 let isMicMuted = false, isCamEnabled = true, currentCamFacing = "user";
+let seatDecorMap = {}, mySeatDecorUrl = "";
 let liveMusicAudio = null, liveAudioCtx = null, liveMixedDest = null, notifyAudioCtx = null;
 let voiceRecorder = null, voiceChunks = [], voiceTimerInt = null, voiceSeconds = 0, voiceMimeType = "";
-let swReg = null;
+let swReg = null, activeActionMsg = null, activeActionMsgParsed = null;
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("./sw.js").then(r => { swReg = r; }).catch(() => {});
@@ -78,10 +79,8 @@ enableNotifyBtn.addEventListener("click", async () => {
     try {
       const res = await Notification.requestPermission();
       refreshNotifyBtnVisibility();
-      if (res === "granted") {
-        playMsgNotificationSound();
-        showToast("تم تفعيل إشعارات الهاتف بنجاح 🔔");
-      } else showToast("يرجى السماح بالإشعارات من إعدادات المتصفح");
+      if (res === "granted") { playMsgNotificationSound(); showToast("تم تفعيل إشعارات الهاتف بنجاح 🔔"); }
+      else showToast("يرجى السماح بالإشعارات من إعدادات المتصفح");
     } catch {}
   }
 });
@@ -116,13 +115,13 @@ function playMsgNotificationSound() {
       const osc = notifyAudioCtx.createOscillator(), gain = notifyAudioCtx.createGain();
       osc.type = "sine"; osc.frequency.setValueAtTime(freq, start);
       gain.gain.setValueAtTime(0.001, start);
-      gain.gain.exponentialRampToValueAtTime(0.25, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.32, start + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
       osc.connect(gain); gain.connect(notifyAudioCtx.destination);
       osc.start(start); osc.stop(start + dur);
     };
-    playTone(880, now, 0.12);
-    playTone(1175, now + 0.11, 0.18);
+    playTone(880, now, 0.13);
+    playTone(1244, now + 0.12, 0.2);
   } catch {}
 }
 
@@ -137,14 +136,12 @@ function playLiveNotificationSound() {
       const osc = notifyAudioCtx.createOscillator(), gain = notifyAudioCtx.createGain();
       osc.type = "triangle"; osc.frequency.setValueAtTime(freq, start);
       gain.gain.setValueAtTime(0.001, start);
-      gain.gain.exponentialRampToValueAtTime(0.28, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.3, start + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
       osc.connect(gain); gain.connect(notifyAudioCtx.destination);
       osc.start(start); osc.stop(start + dur);
     };
-    playTone(660, now, 0.12);
-    playTone(880, now + 0.12, 0.12);
-    playTone(1320, now + 0.24, 0.24);
+    playTone(660, now, 0.12); playTone(880, now + 0.12, 0.12); playTone(1320, now + 0.24, 0.24);
   } catch {}
 }
 
@@ -195,6 +192,47 @@ function showTopLiveNotification(hostProfile, room) {
   sendSystemNotification(`🔴 @${uname} في بث مباشر الآن`, meta.t || "اضغط للدخول إلى البث", hostProfile?.avatar_url, { kind: "live", roomId: room.id }, "dz-live-" + room.id);
 }
 
+/* === إعدادات الخاص + حالة القراءة === */
+function getAllChatPrefs() {
+  if (!currentUser) return {};
+  try { return JSON.parse(localStorage.getItem("dz_chat_prefs_" + currentUser.id) || "{}"); } catch { return {}; }
+}
+function getUserChatPrefs(uid) {
+  if (!uid) return {};
+  return getAllChatPrefs()[uid] || {};
+}
+function setUserChatPref(uid, patch) {
+  if (!currentUser || !uid) return;
+  const all = getAllChatPrefs();
+  all[uid] = { ...(all[uid] || {}), ...patch };
+  localStorage.setItem("dz_chat_prefs_" + currentUser.id, JSON.stringify(all));
+}
+function isUserBlocked(uid) { return !!getUserChatPrefs(uid).blocked; }
+function isUserMsgMuted(uid) { const p = getUserChatPrefs(uid); return !!(p.blocked || p.muteMsgs); }
+function isUserCallMuted(uid) { const p = getUserChatPrefs(uid); return !!(p.blocked || p.muteCalls); }
+function isUserPinned(uid) { return !!getUserChatPrefs(uid).pinned; }
+function isUserNotifyAll(uid) { return !!getUserChatPrefs(uid).notifyAll; }
+
+function getChatReadMap() {
+  if (!currentUser) return {};
+  try { return JSON.parse(localStorage.getItem("dz_chat_read_" + currentUser.id) || "{}"); } catch { return {}; }
+}
+function markChatAsRead(peerId, latestMs) {
+  if (!currentUser) return;
+  const key = peerId === null ? "__public__" : peerId;
+  const map = getChatReadMap();
+  const nextTs = Math.max(map[key] || 0, latestMs || Date.now());
+  map[key] = nextTs;
+  localStorage.setItem("dz_chat_read_" + currentUser.id, JSON.stringify(map));
+}
+function getUnreadCountForPeer(peerId) {
+  if (!currentUser || !peerId || isUserBlocked(peerId)) return 0;
+  const lastRead = getChatReadMap()[peerId] || 0;
+  return allMessagesCache.filter(m =>
+    m.sender_id === peerId && m.receiver_id === currentUser.id && new Date(m.created_at).getTime() > lastRead
+  ).length;
+}
+
 function formatCount(n) { return n >= 1000 ? (n / 1000).toFixed(1) + "K" : String(n); }
 function formatRelTime(iso) {
   if (!iso) return "";
@@ -242,6 +280,30 @@ function attachSwipeBack(el, onBack) {
     if (dx < -70 && Math.abs(dx) > Math.abs(dy) * 1.4 && Math.abs(dy) < 95) onBack();
   }, { passive: true });
 }
+function attachLongPress(el, onLongPress) {
+  if (!el) return;
+  let timer = null, sx = 0, sy = 0;
+  const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  el.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1 || e.target.closest("button, audio, video")) return;
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+    timer = setTimeout(() => { timer = null; onLongPress(); }, 450);
+  }, { passive: true });
+  el.addEventListener("touchmove", e => {
+    if (!timer || !e.touches.length) return;
+    if (Math.abs(e.touches[0].clientX - sx) > 10 || Math.abs(e.touches[0].clientY - sy) > 10) clear();
+  }, { passive: true });
+  el.addEventListener("touchend", clear);
+  el.addEventListener("touchcancel", clear);
+  el.addEventListener("mousedown", e => {
+    if (e.button !== 0 || e.target.closest("button, audio, video")) return;
+    timer = setTimeout(() => { timer = null; onLongPress(); }, 450);
+  });
+  el.addEventListener("mouseup", clear);
+  el.addEventListener("mouseleave", clear);
+  el.addEventListener("contextmenu", e => { e.preventDefault(); clear(); onLongPress(); });
+}
+
 function getSavedPostIds() {
   if (!currentUser) return [];
   try { return JSON.parse(localStorage.getItem("dz_saved_" + currentUser.id) || "[]"); } catch { return []; }
@@ -257,12 +319,12 @@ function getUserThought() { return currentUser ? (localStorage.getItem("dz_thoug
 function setUserThought(txt) { if (currentUser) localStorage.setItem("dz_thought_" + currentUser.id, txt.trim()); }
 
 function parseRoomMeta(raw) {
-  const fb = { t: raw || "غرفة لايف 🇩🇿", m: "audio", b: "default", p: "" };
+  const fb = { t: raw || "غرفة لايف 🇩🇿", m: "audio", b: "default", p: "", s: "" };
   if (!raw || typeof raw !== "string" || !raw.trim().startsWith("{")) return fb;
-  try { const o = JSON.parse(raw); if (o && typeof o.t === "string") return { t: o.t || fb.t, m: o.m || "audio", b: o.b || "default", p: o.p || "" }; } catch {}
+  try { const o = JSON.parse(raw); if (o && typeof o.t === "string") return { t: o.t || fb.t, m: o.m || "audio", b: o.b || "default", p: o.p || "", s: o.s || "" }; } catch {}
   return fb;
 }
-function packRoomMeta(m) { return JSON.stringify({ t: m.t || "غرفة لايف 🇩🇿", m: m.m || "audio", b: m.b || "default", p: m.p || "" }); }
+function packRoomMeta(m) { return JSON.stringify({ t: m.t || "غرفة لايف 🇩🇿", m: m.m || "audio", b: m.b || "default", p: m.p || "", s: m.s || "" }); }
 function parseMsgPayload(content) {
   if (!content || typeof content !== "string") return { kind: "text", text: "" };
   if (content.trim().startsWith("{")) {
@@ -272,10 +334,10 @@ function parseMsgPayload(content) {
       if (p && p.dz_img) return { kind: "image", url: p.url, react: p.react || "" };
       if (p && p.dz_voice) return { kind: "voice", url: p.url, dur: p.dur || "", react: p.react || "" };
       if (p && p.dz_live_invite) return { kind: "live", roomId: p.roomId, title: p.title, hostName: p.hostName };
-      if (p && p.dz_txt) return { kind: "text", text: p.text || "", react: p.react || "" };
+      if (p && p.dz_txt) return { kind: "text", text: p.text || "", react: p.react || "", edited: !!p.edited };
     } catch {}
   }
-  return { kind: "text", text: content, react: "" };
+  return { kind: "text", text: content, react: "", edited: false };
 }
 
 const authScreen = document.createElement("div");
@@ -286,7 +348,7 @@ document.body.appendChild(authScreen);
 const app = document.querySelector(".app"), pages = document.querySelectorAll(".page"), navItems = document.querySelectorAll(".nav-item");
 function showApp() { authScreen.style.display = "none"; app.style.display = ""; refreshNotifyBtnVisibility(); }
 function showAuth() {
-  leaveLiveRoom(true); closePrivateChat(); closeUserProfile();
+  leaveLiveRoom(true); closePrivateChat(); closeUserProfile(); $("dzChatSettingsModal").hidden = true;
   currentUser = null; currentProfile = null; onlineUserIds = new Set(); initialRoomsLoaded = false; knownLiveRoomIds.clear();
   db.removeAllChannels(); presenceChannel = null; realtimeChannel = null;
   document.querySelectorAll("video").forEach(v => v.pause());
@@ -414,8 +476,7 @@ function unlockLiveAudioPool() {
   unlockNotifyAudio();
   let blocked = false;
   $("liveAudioPool").querySelectorAll("audio").forEach(a => {
-    a.muted = false;
-    a.volume = 1;
+    a.muted = false; a.volume = 1;
     if (a.paused) {
       const p = a.play();
       if (p && p.catch) p.catch(() => { blocked = true; liveAudioUnlockBtn.hidden = false; });
@@ -431,9 +492,10 @@ if (liveRoomEl) {
 
 function renderLiveRoomsStrip() {
   const strip = $("liveRoomsStrip"); strip.textContent = "";
-  if (!liveRoomsCache.length) { strip.hidden = true; return; }
+  const visibleRooms = liveRoomsCache.filter(r => !isUserBlocked(r.host_id));
+  if (!visibleRooms.length) { strip.hidden = true; return; }
   strip.hidden = false;
-  liveRoomsCache.forEach(room => {
+  visibleRooms.forEach(room => {
     const meta = parseRoomMeta(room.title), hostName = profilesMap[room.host_id]?.username || "مضيف";
     const btn = document.createElement("button"); btn.type = "button"; btn.className = "live-room-pill";
     btn.innerHTML = `<span class="live-pill-badge">${meta.p ? "🔒" : "🔴"} لايف</span><strong></strong><small></small>`;
@@ -486,7 +548,7 @@ $("startLiveConfirmBtn").addEventListener("click", async () => {
   if (!currentUser) return;
   unlockNotifyAudio();
   const btn = $("startLiveConfirmBtn"), titleText = $("liveTitleInput").value.trim() || "غرفة لايف 🇩🇿";
-  const packed = packRoomMeta({ t: titleText, m: selectedLiveMode, b: "default", p: "" });
+  const packed = packRoomMeta({ t: titleText, m: selectedLiveMode, b: "default", p: "", s: "" });
   btn.disabled = true; btn.textContent = "جارٍ فتح البث...";
   try {
     await db.from("live_rooms").update({ is_active: false }).eq("host_id", currentUser.id);
@@ -499,12 +561,12 @@ $("startLiveConfirmBtn").addEventListener("click", async () => {
   } catch (err) { alert("تعذر فتح البث:\n" + (err.message || err)); }
   finally { btn.disabled = false; btn.textContent = "بدء البث المباشر الآن"; }
 });
-
 async function enterLiveRoom(room) {
   if (!currentUser || !room) return;
   activeLiveRoom = room;
+  seatDecorMap = {}; mySeatDecorUrl = "";
   const meta = parseRoomMeta(room.title), host = profilesMap[room.host_id] || {}, isHost = room.host_id === currentUser.id;
-  isMicMuted = false; isCamEnabled = meta.m === "video"; currentCamFacing = "user";
+  isMicMuted = false; isCamEnabled = isHost && meta.m === "video"; currentCamFacing = "user";
   liveAudioUnlockBtn.hidden = true;
   document.querySelectorAll(".video-slide video").forEach(v => v.pause());
   $("liveRoomTitle").textContent = (meta.p ? "🔒 " : "") + meta.t;
@@ -513,37 +575,124 @@ async function enterLiveRoom(room) {
   $("liveExitBtn").textContent = isHost ? "إنهاء البث" : "خروج";
   $("liveSettingsBtn").hidden = !isHost;
   $("liveRequestsDrawer").hidden = true;
-  $("liveHostStage").hidden = !isCamEnabled; $("liveHostStage").textContent = "";
   applyLiveRoomBackground(meta.b);
   $("dzLiveRoom").hidden = false;
+
   await loadLiveRoomState();
   await setupLiveRoomRealtime(room.id);
+  const myName = currentProfile?.username || "عضو";
+  db.from("live_comments").insert({ room_id: room.id, user_id: currentUser.id, content: `👋 دخل @${myName} إلى البث` }).then(() => {});
 }
 
 async function loadLiveRoomState() {
   if (!activeLiveRoom) return;
   const [sRes, cRes] = await Promise.all([
     db.from("live_seats").select("*").eq("room_id", activeLiveRoom.id).order("created_at", { ascending: true }),
-    db.from("live_comments").select("*").eq("room_id", activeLiveRoom.id).order("created_at", { ascending: true }).limit(60)
+    db.from("live_comments").select("*").eq("room_id", activeLiveRoom.id).order("created_at", { ascending: true }).limit(80)
   ]);
   liveSeatsCache = sRes.data || []; liveCommentsCache = cRes.data || [];
   renderLiveSeatsAndControls(); renderLiveComments();
   await syncSpeakerMediaAndPresence();
 }
 
-function buildSeatMiniControls() {
-  const wrap = document.createElement("div"); wrap.className = "seat-mini-controls";
-  const mk = (cls, txt, fn) => {
-    const b = document.createElement("button"); b.type = "button"; b.className = "seat-mini-btn " + cls; b.textContent = txt;
-    b.addEventListener("click", e => { e.stopPropagation(); fn(); }); return b;
+function getStreamForUser(uid) {
+  if (!uid || !currentUser) return null;
+  if (uid === currentUser.id) return localMediaStream;
+  return remoteMediaStreams[uid] || null;
+}
+
+function renderSpotlightStage() {
+  const stage = $("liveHostStage");
+  if (!activeLiveRoom || !currentUser) { stage.hidden = true; stage.textContent = ""; return; }
+  const meta = parseRoomMeta(activeLiveRoom.title);
+  const isHost = activeLiveRoom.host_id === currentUser.id;
+  let spotId = meta.s || "";
+
+  if (spotId && spotId !== activeLiveRoom.host_id) {
+    const isSeated = liveSeatsCache.some(s => s.user_id === spotId && s.status === "seated");
+    if (!isSeated) spotId = "";
+  }
+  if (!spotId) {
+    const hs = getStreamForUser(activeLiveRoom.host_id);
+    if (hs && hs.getVideoTracks().some(t => t.enabled && t.readyState === "live")) spotId = activeLiveRoom.host_id;
+  }
+  if (!spotId) { stage.hidden = true; stage.textContent = ""; return; }
+
+  const p = profilesMap[spotId] || {};
+  const stream = getStreamForUser(spotId);
+  const hasVid = stream && stream.getVideoTracks().some(t => t.readyState === "live");
+  const decor = seatDecorMap[spotId];
+
+  stage.hidden = false; stage.textContent = "";
+  const card = document.createElement("div"); card.className = "spotlight-card";
+  if (hasVid) {
+    const v = document.createElement("video"); v.autoplay = true; v.muted = true; v.playsInline = true; v.srcObject = stream;
+    card.appendChild(v); v.play().catch(() => {});
+  } else if (decor) {
+    const bg = document.createElement("img"); bg.className = "spotlight-bg-img"; bg.src = decor; card.appendChild(bg);
+  } else {
+    const av = document.createElement("div"); av.className = "spotlight-av"; setAvatarContent(av, p.avatar_url, p.username);
+    card.appendChild(av);
+  }
+  const lbl = document.createElement("span"); lbl.className = "spotlight-label";
+  lbl.textContent = (spotId === activeLiveRoom.host_id ? "👑 " : "🌟 ") + "@" + (p.username || "عضو");
+  card.appendChild(lbl);
+
+  if (isHost && meta.s) {
+    const unpin = document.createElement("button"); unpin.type = "button"; unpin.className = "spotlight-unpin-btn";
+    unpin.textContent = "✕ تصغير المقعد";
+    unpin.onclick = () => updateLiveRoomMeta({ s: "" });
+    card.appendChild(unpin);
+  }
+  stage.appendChild(card);
+}
+
+function openSeatOptionsModal(userId, seatNum) {
+  if (!activeLiveRoom || !currentUser) return;
+  const isHost = activeLiveRoom.host_id === currentUser.id;
+  const isMe = userId === currentUser.id;
+  if (!isHost && !isMe) { openUserProfile(userId); return; }
+
+  const p = profilesMap[userId] || {};
+  const meta = parseRoomMeta(activeLiveRoom.title);
+  $("seatActionTitle").textContent = (seatNum === 1 ? "👑 مقعد المضيف" : `مقعد ${seatNum}`) + " • @" + (p.username || "عضو");
+  const box = $("seatActionButtons"); box.textContent = "";
+
+  const addBtn = (label, cls, fn) => {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+    if (cls) b.className = cls;
+    b.onclick = () => { $("dzSeatActionModal").hidden = true; fn(); };
+    box.appendChild(b);
   };
-  wrap.append(
-    mk(isMicMuted ? "off" : "on", isMicMuted ? "🔇" : "🎙️", toggleMyLiveMic),
-    mk(isCamEnabled ? "on" : "", isCamEnabled ? "📹" : "📷", toggleSeatCamera),
-    mk("", "🔄", flipSeatCamera),
-    mk("", "🖼️", () => seatPhotoInput.click())
-  );
-  return wrap;
+
+  if (isMe) {
+    addBtn(isMicMuted ? "🎙️ فتح المايك" : "🔇 غلق المايك", isMicMuted ? "" : "modal-cancel-btn", toggleMyLiveMic);
+    addBtn(isCamEnabled ? "📷 غلق الكاميرا" : "📹 فتح الكاميرا", "", toggleSeatCamera);
+    addBtn("🔄 تبديل الكاميرا (أمامية / خلفية)", "", flipSeatCamera);
+    addBtn("🖼️ وضع صورة تزيين في المقعد", "", () => seatPhotoInput.click());
+    if (mySeatDecorUrl) addBtn("🗑️ إزالة صورة تزيين المقعد", "modal-cancel-btn", clearMySeatDecor);
+  }
+  if (isHost) {
+    const isSpot = meta.s === userId;
+    addBtn(isSpot ? "🔽 إلغاء تكبير المقعد" : "🔍 تكبير المقعد في الأعلى", "", () => updateLiveRoomMeta({ s: isSpot ? "" : userId }));
+    if (!isMe) {
+      addBtn("👤 عرض الملف الشخصي", "modal-cancel-btn", () => openUserProfile(userId));
+      addBtn("⬇️ إنزال الضيف من المقعد", "choice-live-btn", () => removeSeatRow(userId));
+    }
+  }
+  $("dzSeatActionModal").hidden = false;
+}
+$("dzCloseSeatAction").addEventListener("click", () => { $("dzSeatActionModal").hidden = true; });
+$("dzSeatActionModal").addEventListener("click", e => { if (e.target === $("dzSeatActionModal")) $("dzSeatActionModal").hidden = true; });
+
+async function clearMySeatDecor() {
+  mySeatDecorUrl = "";
+  if (currentUser) delete seatDecorMap[currentUser.id];
+  if (liveRoomChannel && currentUser) {
+    await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, sid: myLiveSessionSeq, decor: "" });
+  }
+  renderLiveSeatsAndControls();
+  showToast("تمت إزالة صورة المقعد");
 }
 
 function renderLiveSeatsAndControls() {
@@ -563,39 +712,57 @@ function renderLiveSeatsAndControls() {
     btns.append(acc, rej); row.append(nm, btns); reqList.appendChild(row);
   });
 
+  renderSpotlightStage();
+
   const grid = $("liveGuestSeats"); grid.textContent = "";
-  const hp = profilesMap[activeLiveRoom.host_id] || {};
-  const hs = document.createElement("div"); hs.className = "guest-seat occupied host-seat";
-  const hn = document.createElement("span"); hn.className = "seat-num"; hn.textContent = "👑";
-  const ha = document.createElement("div"); ha.className = "seat-avatar";
-  if (isHost && isCamEnabled && localMediaStream?.getVideoTracks().length) {
-    const hv = document.createElement("video"); hv.autoplay = true; hv.muted = true; hv.playsInline = true; hv.srcObject = localMediaStream; ha.appendChild(hv);
-  } else setAvatarContent(ha, hp.avatar_url, hp.username || "المضيف");
-  const hl = document.createElement("div"); hl.className = "seat-name"; hl.textContent = "@" + (hp.username || "المضيف");
-  hs.append(hn, ha, hl);
-  if (isHost) hs.appendChild(buildSeatMiniControls()); else hs.onclick = () => openUserProfile(activeLiveRoom.host_id);
-  grid.appendChild(hs);
+  const buildOccupiedSeat = (userId, seatNum, mutedFlag, isHostSeat) => {
+    const prof = profilesMap[userId] || {}, isMe = userId === currentUser.id;
+    const seatEl = document.createElement("div");
+    seatEl.className = "guest-seat occupied" + (isHostSeat ? " host-seat" : "");
+    const decor = seatDecorMap[userId];
+    if (decor) {
+      seatEl.classList.add("has-decor");
+      const dImg = document.createElement("img"); dImg.className = "seat-decor-img"; dImg.src = decor; seatEl.appendChild(dImg);
+    }
+    const nt = document.createElement("span"); nt.className = "seat-num"; nt.textContent = isHostSeat ? "👑" : seatNum; seatEl.appendChild(nt);
+
+    const muted = isMe ? isMicMuted : !!mutedFlag;
+    const micBtn = document.createElement("button"); micBtn.type = "button";
+    micBtn.className = "seat-mic-btn " + (muted ? "muted" : "unmuted");
+    micBtn.textContent = muted ? "🔇" : "🎙️";
+    if (isMe) micBtn.onclick = e => { e.stopPropagation(); toggleMyLiveMic(); };
+    else micBtn.onclick = e => { e.stopPropagation(); };
+    seatEl.appendChild(micBtn);
+
+    const av = document.createElement("div"); av.className = "seat-avatar";
+    const stream = getStreamForUser(userId);
+    const hasVid = stream && stream.getVideoTracks().some(t => t.readyState === "live") && (!isMe || isCamEnabled);
+    if (hasVid) {
+      const v = document.createElement("video"); v.autoplay = true; v.muted = true; v.playsInline = true; v.srcObject = stream;
+      av.appendChild(v); v.play().catch(() => {});
+    } else setAvatarContent(av, prof.avatar_url, prof.username || "عضو");
+
+    const lb = document.createElement("div"); lb.className = "seat-name"; lb.textContent = "@" + (prof.username || (isHostSeat ? "المضيف" : "ضيف"));
+    seatEl.append(av, lb);
+    seatEl.onclick = () => openSeatOptionsModal(userId, seatNum);
+    return seatEl;
+  };
+
+  grid.appendChild(buildOccupiedSeat(activeLiveRoom.host_id, 1, false, true));
 
   for (let num = 2; num <= 9; num++) {
-    const guest = seated.find(s => s.seat_number === num), seatEl = document.createElement("div");
-    seatEl.className = "guest-seat" + (guest ? " occupied" : "");
-    const nt = document.createElement("span"); nt.className = "seat-num"; nt.textContent = num; seatEl.appendChild(nt);
-    const av = document.createElement("div"); av.className = "seat-avatar", lb = document.createElement("div"); lb.className = "seat-name";
+    const guest = seated.find(s => s.seat_number === num);
     if (guest) {
-      const gp = profilesMap[guest.user_id] || {}, isMe = guest.user_id === currentUser.id;
-      if (isMe && isCamEnabled && localMediaStream?.getVideoTracks().length) {
-        const gv = document.createElement("video"); gv.autoplay = true; gv.muted = true; gv.playsInline = true; gv.srcObject = localMediaStream; av.appendChild(gv);
-      } else setAvatarContent(av, gp.avatar_url, gp.username || "ضيف");
-      lb.textContent = "@" + (gp.username || "ضيف");
-      if (!isMe) { const mc = document.createElement("span"); mc.className = "seat-mic"; mc.textContent = guest.is_muted ? "🔇" : "🎙️"; seatEl.appendChild(mc); }
-      seatEl.append(av, lb);
-      if (isMe) seatEl.appendChild(buildSeatMiniControls());
-      if (isHost) seatEl.onclick = () => { if (confirm(`إنزال @${gp.username || "الضيف"}؟`)) removeSeatRow(guest.user_id); };
+      grid.appendChild(buildOccupiedSeat(guest.user_id, num, guest.is_muted, false));
     } else {
-      av.textContent = "＋"; lb.textContent = `مقعد ${num}`; seatEl.append(av, lb);
+      const seatEl = document.createElement("div"); seatEl.className = "guest-seat";
+      const nt = document.createElement("span"); nt.className = "seat-num"; nt.textContent = num; seatEl.appendChild(nt);
+      const av = document.createElement("div"); av.className = "seat-avatar"; av.textContent = "＋";
+      const lb = document.createElement("div"); lb.className = "seat-name"; lb.textContent = `مقعد ${num}`;
+      seatEl.append(av, lb);
       if (!isHost && !mySeat) seatEl.onclick = requestToJoinSeat;
+      grid.appendChild(seatEl);
     }
-    grid.appendChild(seatEl);
   }
 
   const ctrl = $("liveActionControls"); ctrl.textContent = "";
@@ -608,13 +775,43 @@ function renderLiveSeatsAndControls() {
   }
 }
 
+async function attachOrReplaceVideoTrack(vt) {
+  for (const [pid, pc] of Object.entries(peerConnections)) {
+    try {
+      const vidTransceiver = pc.getTransceivers().find(t =>
+        (t.sender?.track?.kind === "video") || (t.receiver?.track?.kind === "video")
+      );
+      if (vidTransceiver) {
+        if (vidTransceiver.direction === "recvonly" || vidTransceiver.direction === "inactive") {
+          vidTransceiver.direction = "sendrecv";
+        }
+        await vidTransceiver.sender.replaceTrack(vt);
+        if (pc.signalingState === "stable" && liveRoomChannel) {
+          const o = await pc.createOffer();
+          await pc.setLocalDescription(o);
+          liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: pid, from: currentUser.id, sdp: pc.localDescription, sid: myLiveSessionSeq } });
+        }
+      } else {
+        pc.addTrack(vt, localMediaStream);
+        if (pc.signalingState === "stable" && liveRoomChannel) {
+          const o = await pc.createOffer();
+          await pc.setLocalDescription(o);
+          liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: pid, from: currentUser.id, sdp: pc.localDescription, sid: myLiveSessionSeq } });
+        }
+      }
+    } catch {}
+  }
+}
+
 async function toggleSeatCamera() {
   if (!activeLiveRoom || !currentUser) return;
-  const isHost = activeLiveRoom.host_id === currentUser.id;
   if (isCamEnabled) {
     isCamEnabled = false;
     if (localMediaStream) localMediaStream.getVideoTracks().forEach(t => { t.stop(); localMediaStream.removeTrack(t); });
-    if (isHost) { $("liveHostStage").hidden = true; $("liveHostStage").textContent = ""; }
+    Object.values(peerConnections).forEach(pc => {
+      const s = pc.getSenders().find(x => x.track?.kind === "video");
+      if (s) s.replaceTrack(null).catch(() => {});
+    });
     renderLiveSeatsAndControls(); showToast("تم غلق الكاميرا 📷"); return;
   }
   try {
@@ -623,22 +820,7 @@ async function toggleSeatCamera() {
     if (!localMediaStream) localMediaStream = new MediaStream();
     localMediaStream.getVideoTracks().forEach(t => { t.stop(); localMediaStream.removeTrack(t); });
     localMediaStream.addTrack(vt); isCamEnabled = true;
-    for (const [pid, pc] of Object.entries(peerConnections)) {
-      const s = pc.getSenders().find(x => x.track && x.track.kind === "video");
-      if (s) await s.replaceTrack(vt).catch(() => {});
-      else if (pc.signalingState === "stable") {
-        pc.addTrack(vt, localMediaStream);
-        if (liveRoomChannel) {
-          const o = await pc.createOffer();
-          await pc.setLocalDescription(o);
-          liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: pid, from: currentUser.id, sdp: pc.localDescription, sid: myLiveSessionSeq } });
-        }
-      }
-    }
-    if (isHost) {
-      const st = $("liveHostStage"); st.hidden = false; st.textContent = "";
-      const v = document.createElement("video"); v.autoplay = true; v.muted = true; v.playsInline = true; v.srcObject = localMediaStream; st.appendChild(v);
-    }
+    await attachOrReplaceVideoTrack(vt);
     renderLiveSeatsAndControls(); showToast("تم فتح الكاميرا 📹");
   } catch { showToast("تعذر تشغيل الكاميرا"); }
 }
@@ -653,30 +835,30 @@ async function flipSeatCamera() {
     const nt = vs.getVideoTracks()[0];
     if (!localMediaStream) localMediaStream = new MediaStream();
     localMediaStream.addTrack(nt);
-    Object.values(peerConnections).forEach(pc => { const s = pc.getSenders().find(x => x.track?.kind === "video"); if (s) s.replaceTrack(nt).catch(() => {}); });
-    const sv = $("liveHostStage").querySelector("video"); if (sv) sv.srcObject = localMediaStream;
+    await attachOrReplaceVideoTrack(nt);
     renderLiveSeatsAndControls(); showToast(currentCamFacing === "user" ? "الكاميرا الأمامية 🤳" : "الكاميرا الخلفية 📷");
   } catch { showToast("تعذر تبديل الكاميرا"); }
 }
 
 seatPhotoInput.addEventListener("change", async e => {
-  const file = e.target.files[0]; if (!file || !currentUser) return;
-  showToast("جارٍ تحديث صورة المقعد...");
+  const file = e.target.files[0]; if (!file || !currentUser || !activeLiveRoom) return;
+  showToast("جارٍ وضع الصورة في المقعد...");
   try {
     const ext = file.name.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
-    const path = `${currentUser.id}/seat_${Date.now()}.${ext}`;
+    const path = `${currentUser.id}/seatdecor_${Date.now()}.${ext}`;
     const { error: upErr } = await db.storage.from(STORAGE_BUCKET).upload(path, file, { upsert: true, contentType: file.type || "image/jpeg" });
     if (upErr) throw upErr;
     const url = db.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
-    await db.from("profiles").update({ avatar_url: url }).eq("id", currentUser.id);
-    if (currentProfile) currentProfile.avatar_url = url;
-    if (profilesMap[currentUser.id]) profilesMap[currentUser.id].avatar_url = url;
+    mySeatDecorUrl = url;
+    seatDecorMap[currentUser.id] = url;
     isCamEnabled = false;
     if (localMediaStream) localMediaStream.getVideoTracks().forEach(t => { t.stop(); localMediaStream.removeTrack(t); });
-    if (activeLiveRoom?.host_id === currentUser.id) { $("liveHostStage").hidden = true; $("liveHostStage").textContent = ""; }
-    if (liveRoomChannel) liveRoomChannel.send({ type: "broadcast", event: "seat-photo", payload: { user_id: currentUser.id, url } });
-    renderLiveSeatsAndControls(); renderProfile(); showToast("تم وضع الصورة في المقعد ✅");
-  } catch (err) { showToast("تعذر تغيير الصورة: " + err.message); }
+    if (liveRoomChannel) {
+      liveRoomChannel.send({ type: "broadcast", event: "seat-decor", payload: { user_id: currentUser.id, url } });
+      await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, sid: myLiveSessionSeq, decor: url });
+    }
+    renderLiveSeatsAndControls(); showToast("تم تزيين المقعد بالصورة ✅");
+  } catch (err) { showToast("تعذر وضع الصورة: " + err.message); }
   e.target.value = "";
 });
 
@@ -706,7 +888,13 @@ async function approveGuestRequest(userId) {
 async function removeSeatRow(userId) {
   if (!activeLiveRoom) return;
   const { error } = await db.from("live_seats").delete().match({ room_id: activeLiveRoom.id, user_id: userId });
-  if (error) showToast("تعذر التنفيذ: " + error.message); else await loadLiveRoomState();
+  if (error) showToast("تعذر التنفيذ: " + error.message);
+  else {
+    if (parseRoomMeta(activeLiveRoom.title).s === userId && activeLiveRoom.host_id === currentUser.id) {
+      await updateLiveRoomMeta({ s: "" });
+    }
+    await loadLiveRoomState();
+  }
 }
 
 async function toggleMyLiveMic() {
@@ -716,6 +904,7 @@ async function toggleMyLiveMic() {
     await db.from("live_seats").update({ is_muted: isMicMuted }).match({ room_id: activeLiveRoom.id, user_id: currentUser.id });
   }
   renderLiveSeatsAndControls();
+  showToast(isMicMuted ? "تم كتم المايك 🔇" : "المايك مفتوح 🎙️");
 }
 
 $("liveSettingsBtn").addEventListener("click", () => {
@@ -735,6 +924,7 @@ async function updateLiveRoomMeta(patch) {
   if (error) { showToast("فشل تحديث الخصائص: " + error.message); return; }
   activeLiveRoom.title = packed; $("liveRoomTitle").textContent = (meta.p ? "🔒 " : "") + meta.t;
   applyLiveRoomBackground(meta.b);
+  renderSpotlightStage();
   if (liveRoomChannel) liveRoomChannel.send({ type: "broadcast", event: "room-meta", payload: meta });
 }
 
@@ -820,7 +1010,8 @@ $("dzLiveShareModal").addEventListener("click", e => { if (e.target === $("dzLiv
 function renderLiveComments() {
   const box = $("liveCommentsArea"); box.textContent = "";
   liveCommentsCache.forEach(c => {
-    const uname = profilesMap[c.user_id]?.username || "عضو", pill = document.createElement("div"), isSys = c.content.startsWith("✅ صعد");
+    const uname = profilesMap[c.user_id]?.username || "عضو", pill = document.createElement("div");
+    const isSys = c.content.startsWith("✅ صعد") || c.content.startsWith("👋 دخل") || c.content.startsWith("🚪 غادر");
     pill.className = "live-comment-pill" + (isSys ? " sys" : "");
     if (isSys) pill.textContent = c.content;
     else { const st = document.createElement("strong"); st.textContent = "@" + uname + ":"; const tx = document.createElement("span"); tx.textContent = c.content; pill.append(st, tx); }
@@ -842,18 +1033,21 @@ $("liveExitBtn").addEventListener("click", async () => {
   if (activeLiveRoom.host_id === currentUser.id) {
     if (!confirm("هل تريد إنهاء البث للجميع؟")) return;
     await db.from("live_rooms").update({ is_active: false }).eq("id", activeLiveRoom.id);
-  } else await db.from("live_seats").delete().match({ room_id: activeLiveRoom.id, user_id: currentUser.id });
+  } else {
+    await db.from("live_seats").delete().match({ room_id: activeLiveRoom.id, user_id: currentUser.id });
+  }
   leaveLiveRoom(false);
 });
 
 function closePeer(peerId) {
   if (peerConnections[peerId]) { try { peerConnections[peerId].close(); } catch {} delete peerConnections[peerId]; }
   delete pendingIceCandidates[peerId];
+  delete remoteMediaStreams[peerId];
   const a = document.getElementById("aud_" + peerId); if (a) a.remove();
 }
 function closeAllPeers() {
   Object.keys(peerConnections).forEach(closePeer);
-  peerConnections = {}; pendingIceCandidates = {}; $("liveAudioPool").textContent = "";
+  peerConnections = {}; pendingIceCandidates = {}; remoteMediaStreams = {}; $("liveAudioPool").textContent = "";
 }
 function leaveLiveRoom(silent = false) {
   closeAllPeers(); liveAudioUnlockBtn.hidden = true;
@@ -861,29 +1055,38 @@ function leaveLiveRoom(silent = false) {
   if (liveMixedDest) { liveMixedDest = null; }
   if (localMediaStream) { localMediaStream.getTracks().forEach(t => t.stop()); localMediaStream = null; }
   if (liveRoomChannel) { db.removeChannel(liveRoomChannel); liveRoomChannel = null; }
-  amISpeakerNow = false; activeLiveRoom = null; $("dzLiveRoom").hidden = true;
+  amISpeakerNow = false; activeLiveRoom = null; seatDecorMap = {}; mySeatDecorUrl = ""; $("dzLiveRoom").hidden = true;
   if (!silent) refreshAllData(false);
 }
 
 async function ensureLocalMediaIfNeeded(shouldSpeak) {
   if (!shouldSpeak) {
     if (localMediaStream) { localMediaStream.getTracks().forEach(t => t.stop()); localMediaStream = null; }
+    isCamEnabled = false;
     return false;
   }
-  if (localMediaStream) return true;
+  if (localMediaStream && localMediaStream.getAudioTracks().length) {
+    localMediaStream.getAudioTracks().forEach(t => { t.enabled = !isMicMuted; });
+    return true;
+  }
   const isHost = activeLiveRoom && activeLiveRoom.host_id === currentUser.id;
   const wantVideo = isHost && parseRoomMeta(activeLiveRoom?.title || "").m === "video";
   try {
-    localMediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: wantVideo ? { facingMode: { ideal: currentCamFacing } } : false });
+    localMediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: wantVideo ? { facingMode: { ideal: currentCamFacing } } : false
+    });
   } catch {
-    try { localMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); isCamEnabled = false; }
-    catch { showToast("تأكد من منح إذن الميكروفون للمتصفح/التطبيق"); return false; }
+    try {
+      localMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      isCamEnabled = false;
+    } catch {
+      showToast("تأكد من منح إذن الميكروفون للمتصفح");
+      return false;
+    }
   }
-  localMediaStream.getAudioTracks().forEach(t => { t.enabled = !isMicMuted; });
-  if (wantVideo && localMediaStream.getVideoTracks().length) {
-    const st = $("liveHostStage"); st.hidden = false; st.textContent = "";
-    const v = document.createElement("video"); v.autoplay = true; v.muted = true; v.playsInline = true; v.srcObject = localMediaStream; st.appendChild(v);
-  }
+  isMicMuted = false;
+  localMediaStream.getAudioTracks().forEach(t => { t.enabled = true; });
   renderLiveSeatsAndControls();
   return true;
 }
@@ -898,14 +1101,18 @@ async function syncSpeakerMediaAndPresence() {
     await ensureLocalMediaIfNeeded(shouldSpeak);
     closeAllPeers();
     myLiveSessionSeq++;
-    await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: shouldSpeak, sid: myLiveSessionSeq });
+    await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: shouldSpeak, sid: myLiveSessionSeq, decor: mySeatDecorUrl });
   }
 }
 
-function createPeerConnection(peerId, peerSid = 0) {
+function getLocalAudioTrack() {
+  return liveMixedDest?.stream?.getAudioTracks()[0] || localMediaStream?.getAudioTracks()[0] || null;
+}
+
+function createPeerConnection(peerId, peerSid = 0, isOfferer = false) {
   if (peerConnections[peerId]) return peerConnections[peerId];
   const pc = new RTCPeerConnection({
-    iceCandidatePoolSize: 4,
+    iceCandidatePoolSize: 2,
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
@@ -919,48 +1126,79 @@ function createPeerConnection(peerId, peerSid = 0) {
   peerConnections[peerId] = pc;
   pendingIceCandidates[peerId] = [];
 
-  if (localMediaStream) {
-    const mixedAudio = liveMixedDest?.stream?.getAudioTracks()[0];
-    localMediaStream.getTracks().forEach(track => {
-      if (track.kind === "audio" && mixedAudio) pc.addTrack(mixedAudio, liveMixedDest.stream);
-      else pc.addTrack(track, localMediaStream);
-    });
-  } else {
-    pc.addTransceiver("audio", { direction: "recvonly" });
-    pc.addTransceiver("video", { direction: "recvonly" });
+  if (isOfferer) {
+    const audioTrack = getLocalAudioTrack();
+    const videoTrack = localMediaStream?.getVideoTracks()[0] || null;
+    if (audioTrack) pc.addTrack(audioTrack, liveMixedDest?.stream || localMediaStream);
+    else pc.addTransceiver("audio", { direction: "recvonly" });
+
+    if (videoTrack) pc.addTrack(videoTrack, localMediaStream);
+    else pc.addTransceiver("video", { direction: "recvonly" });
   }
 
   pc.onicecandidate = ev => {
-    if (ev.candidate && liveRoomChannel) liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: peerId, from: currentUser.id, candidate: ev.candidate, sid: myLiveSessionSeq } });
+    if (ev.candidate && liveRoomChannel) {
+      liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: peerId, from: currentUser.id, candidate: ev.candidate, sid: myLiveSessionSeq } });
+    }
   };
   pc.oniceconnectionstatechange = () => {
     if (pc.iceConnectionState === "failed") { try { pc.restartIce(); } catch {} }
     else if (pc.iceConnectionState === "disconnected") {
-      setTimeout(() => { if (peerConnections[peerId] === pc && pc.iceConnectionState === "disconnected") { try { pc.restartIce(); } catch {} } }, 3500);
+      setTimeout(() => { if (peerConnections[peerId] === pc && pc.iceConnectionState === "disconnected") { try { pc.restartIce(); } catch {} } }, 3000);
     }
   };
   pc.ontrack = ev => {
-    if (ev.track.kind === "video" && activeLiveRoom && peerId === activeLiveRoom.host_id) {
-      const stream = ev.streams[0] || new MediaStream([ev.track]);
-      const st = $("liveHostStage"); st.hidden = false; st.textContent = "";
-      const v = document.createElement("video"); v.autoplay = true; v.muted = true; v.playsInline = true; v.srcObject = stream;
-      st.appendChild(v); v.play().catch(() => {});
+    if (!remoteMediaStreams[peerId]) remoteMediaStreams[peerId] = new MediaStream();
+    const rs = remoteMediaStreams[peerId];
+    rs.getTracks().filter(t => t.kind === ev.track.kind).forEach(t => rs.removeTrack(t));
+    rs.addTrack(ev.track);
+
+    if (ev.track.kind === "video") {
+      ev.track.onended = () => renderLiveSeatsAndControls();
+      renderLiveSeatsAndControls();
     }
     if (ev.track.kind === "audio") {
       let audio = document.getElementById("aud_" + peerId);
       if (!audio) {
-        audio = document.createElement("audio"); audio.id = "aud_" + peerId;
-        audio.autoplay = true; audio.playsInline = true; audio.muted = false; audio.volume = 1;
+        audio = document.createElement("audio");
+        audio.id = "aud_" + peerId;
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.muted = false;
+        audio.volume = 1;
         $("liveAudioPool").appendChild(audio);
       }
-      const curTrack = audio.srcObject?.getAudioTracks?.()[0];
-      if (!curTrack || curTrack.id !== ev.track.id) {
-        audio.srcObject = new MediaStream([ev.track]);
-      }
-      audio.play().catch(() => { liveAudioUnlockBtn.hidden = false; });
+      audio.srcObject = new MediaStream([ev.track]);
+      const p = audio.play();
+      if (p && p.catch) p.catch(() => { liveAudioUnlockBtn.hidden = false; });
     }
   };
   return pc;
+}
+
+async function attachLocalTracksToAnswerer(pc) {
+  const audioTrack = getLocalAudioTrack();
+  const videoTrack = localMediaStream?.getVideoTracks()[0] || null;
+  const transceivers = pc.getTransceivers();
+
+  if (audioTrack) {
+    const at = transceivers.find(t => t.receiver?.track?.kind === "audio" || t.sender?.track?.kind === "audio");
+    if (at) {
+      await at.sender.replaceTrack(audioTrack);
+      at.direction = "sendrecv";
+    } else {
+      pc.addTrack(audioTrack, liveMixedDest?.stream || localMediaStream);
+    }
+  }
+  if (videoTrack) {
+    const vt = transceivers.find(t => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video");
+    if (vt) {
+      await vt.sender.replaceTrack(videoTrack);
+      vt.direction = "sendrecv";
+    } else {
+      pc.addTrack(videoTrack, localMediaStream);
+    }
+  }
 }
 
 async function flushPendingIce(peerId, pc) {
@@ -970,7 +1208,7 @@ async function flushPendingIce(peerId, pc) {
 }
 
 async function initiateOfferToPeer(peerId, peerSid = 0) {
-  const pc = createPeerConnection(peerId, peerSid);
+  const pc = createPeerConnection(peerId, peerSid, true);
   if (pc.signalingState !== "stable") return;
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
@@ -997,43 +1235,64 @@ async function setupLiveRoomRealtime(roomId) {
       if (payload.new?.is_active === false) { showToast("انتهى البث المباشر"); leaveLiveRoom(false); }
       else if (payload.new && activeLiveRoom) {
         activeLiveRoom.title = payload.new.title; const m = parseRoomMeta(payload.new.title);
-        $("liveRoomTitle").textContent = (m.p ? "🔒 " : "") + m.t; applyLiveRoomBackground(m.b);
+        $("liveRoomTitle").textContent = (m.p ? "🔒 " : "") + m.t; applyLiveRoomBackground(m.b); renderSpotlightStage();
       }
     })
     .on("broadcast", { event: "room-meta" }, ({ payload }) => {
-      if (payload && activeLiveRoom) { activeLiveRoom.title = packRoomMeta(payload); $("liveRoomTitle").textContent = (payload.p ? "🔒 " : "") + payload.t; applyLiveRoomBackground(payload.b); }
+      if (payload && activeLiveRoom) {
+        activeLiveRoom.title = packRoomMeta(payload);
+        $("liveRoomTitle").textContent = (payload.p ? "🔒 " : "") + payload.t;
+        applyLiveRoomBackground(payload.b);
+        renderSpotlightStage();
+      }
     })
-    .on("broadcast", { event: "seat-photo" }, ({ payload }) => {
-      if (payload?.user_id && profilesMap[payload.user_id]) { profilesMap[payload.user_id].avatar_url = payload.url; renderLiveSeatsAndControls(); }
+    .on("broadcast", { event: "seat-decor" }, ({ payload }) => {
+      if (payload?.user_id) {
+        if (payload.url) seatDecorMap[payload.user_id] = payload.url;
+        else delete seatDecorMap[payload.user_id];
+        renderLiveSeatsAndControls();
+      }
     })
     .on("presence", { event: "leave" }, ({ leftPresences }) => {
       (leftPresences || []).forEach(p => { if (p?.user_id && p.user_id !== currentUser.id) closePeer(p.user_id); });
     })
     .on("presence", { event: "sync" }, async () => {
       const peers = Object.values(liveRoomChannel.presenceState()).flat();
+      let decorChanged = false;
       for (const p of peers) {
-        if (!p.user_id || p.user_id === currentUser.id) continue;
+        if (!p.user_id) continue;
+        if (p.decor !== undefined) {
+          const prev = seatDecorMap[p.user_id] || "";
+          if (prev !== (p.decor || "")) {
+            if (p.decor) seatDecorMap[p.user_id] = p.decor; else delete seatDecorMap[p.user_id];
+            decorChanged = true;
+          }
+        }
+        if (p.user_id === currentUser.id) continue;
         const existing = peerConnections[p.user_id];
-        if (existing && p.sid && existing._sid && existing._sid !== p.sid) closePeer(p.user_id);
+        if (existing && p.sid !== undefined && existing._sid !== p.sid) closePeer(p.user_id);
         if ((amISpeakerNow || p.is_speaker) && currentUser.id < p.user_id && !peerConnections[p.user_id]) {
           await initiateOfferToPeer(p.user_id, p.sid || 0);
         }
       }
+      if (decorChanged) renderLiveSeatsAndControls();
     })
     .on("broadcast", { event: "rtc-signal" }, async ({ payload }) => {
       if (!payload || payload.to !== currentUser.id) return;
-      if (payload.sdp?.type === "offer" && payload.sid && peerConnections[payload.from]?._sid && peerConnections[payload.from]._sid !== payload.sid) {
+      if (payload.sdp?.type === "offer" && payload.sid !== undefined && peerConnections[payload.from] && peerConnections[payload.from]._sid !== payload.sid) {
         closePeer(payload.from);
       }
-      const pc = createPeerConnection(payload.from, payload.sid || 0);
+      const pc = createPeerConnection(payload.from, payload.sid || 0, false);
       if (payload.sdp) {
+        const polite = currentUser.id > payload.from;
         if (payload.sdp.type === "offer" && pc.signalingState !== "stable") {
-          if (currentUser.id < payload.from) return;
+          if (!polite) return;
           try { await pc.setLocalDescription({ type: "rollback" }); } catch {}
         }
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
         await flushPendingIce(payload.from, pc);
         if (payload.sdp.type === "offer") {
+          await attachLocalTracksToAnswerer(pc);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: payload.from, from: currentUser.id, sdp: pc.localDescription, sid: myLiveSessionSeq } });
@@ -1043,8 +1302,13 @@ async function setupLiveRoomRealtime(roomId) {
         else { pendingIceCandidates[payload.from] = pendingIceCandidates[payload.from] || []; pendingIceCandidates[payload.from].push(payload.candidate); }
       }
     })
-    .subscribe(async status => { if (status === "SUBSCRIBED") await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, sid: myLiveSessionSeq }); });
+    .subscribe(async status => {
+      if (status === "SUBSCRIBED") {
+        await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, sid: myLiveSessionSeq, decor: mySeatDecorUrl });
+      }
+    });
 }
+
 function buildFeedSlide(post) {
   const slide = document.createElement("div");
   slide.className = "video-slide";
@@ -1120,11 +1384,12 @@ function buildFeedSlide(post) {
 
 function renderVideoFeed() {
   const feed = $("videoFeed"); if (feedObserver) feedObserver.disconnect(); feed.textContent = "";
-  if (!videosCache.length) {
+  const visible = videosCache.filter(v => !isUserBlocked(v.user_id));
+  if (!visible.length) {
     feed.innerHTML = `<div class="video-slide"><div class="video-placeholder"><div class="play-symbol">▶</div><span>مرحباً بك في DZ-CHAT</span><small>اضغط (+) لنشر صورة/فيديو أو فتح بث مباشر 🇩🇿</small></div><div class="video-gradient"></div></div>`;
     return;
   }
-  videosCache.forEach(post => feed.appendChild(buildFeedSlide(post)));
+  visible.forEach(post => feed.appendChild(buildFeedSlide(post)));
   feedObserver = new IntersectionObserver(entries => {
     entries.forEach(entry => {
       const vid = entry.target.querySelector("video"); if (!vid) return;
@@ -1138,7 +1403,7 @@ function renderFriendsFeed() {
   if (!currentUser) return;
   const followingIds = new Set(followsCache.filter(f => f.follower_id === currentUser.id).map(f => f.following_id));
   const topAvs = $("friendsTopAvatars"); topAvs.textContent = "";
-  [...followingIds].slice(0, 3).map(id => profilesMap[id]).filter(Boolean).forEach(f => {
+  [...followingIds].filter(id => !isUserBlocked(id)).slice(0, 3).map(id => profilesMap[id]).filter(Boolean).forEach(f => {
     const isLive = liveRoomsCache.some(r => r.host_id === f.id), av = document.createElement("button");
     av.type = "button"; av.className = "friends-mini-av" + (isLive ? " live" : "");
     setAvatarContent(av, f.avatar_url, f.username);
@@ -1147,7 +1412,7 @@ function renderFriendsFeed() {
   });
 
   const feed = $("friendsFeed"); if (friendsFeedObserver) friendsFeedObserver.disconnect(); feed.textContent = "";
-  const friendPosts = videosCache.filter(v => followingIds.has(v.user_id));
+  const friendPosts = videosCache.filter(v => followingIds.has(v.user_id) && !isUserBlocked(v.user_id));
   if (!friendPosts.length) {
     feed.innerHTML = `<div class="video-slide"><div class="video-placeholder"><div class="play-symbol">👥</div><span>منشورات أصدقائك</span><small>${followingIds.size ? "لم ينشر أصدقاؤك منشورات جديدة بعد." : "تابع أصدقاءك لتظهر كل منشوراتهم هنا!"}</small><button type="button" class="play-mini-btn" id="friendsFindBtn" style="margin-top:8px;">اكتشف أصدقاء للمتابعة 🔍</button></div><div class="video-gradient"></div></div>`;
     if ($("friendsFindBtn")) $("friendsFindBtn").addEventListener("click", openSearchModal);
@@ -1314,7 +1579,7 @@ $("commentForm").addEventListener("submit", async e => {
 function openShareModal(post) {
   activeSharePost = post;
   const select = $("shareFriendSelect"); select.textContent = "";
-  const friends = Object.values(profilesMap).filter(p => currentUser && p.id !== currentUser.id);
+  const friends = Object.values(profilesMap).filter(p => currentUser && p.id !== currentUser.id && !isUserBlocked(p.id));
   if (!friends.length) { const o = document.createElement("option"); o.value = ""; o.textContent = "لا يوجد أصدقاء بعد"; select.appendChild(o); }
   else friends.forEach(f => { const o = document.createElement("option"); o.value = f.id; o.textContent = "@" + f.username; select.appendChild(o); });
   $("shareLinkInput").value = post.video_url || ""; $("dzShareModal").hidden = false;
@@ -1376,11 +1641,10 @@ $("inboxStatusToggle").addEventListener("click", async () => {
   if (presenceChannel && currentUser) await presenceChannel.track({ user_id: currentUser.id, active: showOnlineStatus });
   showToast(showOnlineStatus ? "حالة النشاط مفعلة 🟢" : "حالة النشاط مخفية");
 });
-
 function renderInbox() {
   if (!currentUser) return;
   const miniStack = $("inboxMiniStack"); miniStack.textContent = "";
-  Object.values(profilesMap).filter(p => p.id !== currentUser.id && (liveRoomsCache.some(r => r.host_id === p.id) || onlineUserIds.has(p.id))).slice(0, 2).forEach(p => {
+  Object.values(profilesMap).filter(p => p.id !== currentUser.id && !isUserBlocked(p.id) && (liveRoomsCache.some(r => r.host_id === p.id) || onlineUserIds.has(p.id))).slice(0, 2).forEach(p => {
     const isLive = liveRoomsCache.some(r => r.host_id === p.id), av = document.createElement("div");
     av.className = "friends-mini-av" + (isLive ? " live" : ""); setAvatarContent(av, p.avatar_url, p.username); miniStack.appendChild(av);
   });
@@ -1399,6 +1663,7 @@ function renderInbox() {
 
   const liveHostIds = new Set();
   liveRoomsCache.forEach(room => {
+    if (isUserBlocked(room.host_id)) return;
     liveHostIds.add(room.host_id);
     const host = profilesMap[room.host_id] || { id: room.host_id, username: "مضيف" };
     const item = document.createElement("button"); item.type = "button"; item.className = "story-item";
@@ -1411,7 +1676,7 @@ function renderInbox() {
   });
 
   Object.values(profilesMap).forEach(p => {
-    if (p.id === currentUser.id || liveHostIds.has(p.id)) return;
+    if (p.id === currentUser.id || liveHostIds.has(p.id) || isUserBlocked(p.id)) return;
     const isOn = onlineUserIds.has(p.id), item = document.createElement("button"); item.type = "button"; item.className = "story-item";
     const ring = document.createElement("div"); ring.className = "story-ring" + (isOn ? " online-ring" : "");
     const inner = document.createElement("div"); inner.className = "story-avatar-inner"; setAvatarContent(inner, p.avatar_url, p.username);
@@ -1421,9 +1686,23 @@ function renderInbox() {
   });
 
   const list = $("inboxChatsList"); list.textContent = "";
+  const others = Object.values(profilesMap).filter(p => p.id !== currentUser.id), lastMap = {};
+  allMessagesCache.forEach(m => {
+    if (m.receiver_id === null) return;
+    const oid = m.sender_id === currentUser.id ? m.receiver_id : m.sender_id;
+    if (!lastMap[oid]) lastMap[oid] = m;
+  });
+
+  let totalUnreadMsgs = 0;
+  others.forEach(f => { totalUnreadMsgs += getUnreadCountForPeer(f.id); });
+
   const myPostIds = new Set(videosCache.filter(v => v.user_id === currentUser.id).map(v => v.id));
   const actCount = likesCache.filter(l => myPostIds.has(l.video_id) && l.user_id !== currentUser.id).length + followsCache.filter(f => f.following_id === currentUser.id).length;
-  if ($("inboxNavBadge")) { $("inboxNavBadge").hidden = actCount === 0; $("inboxNavBadge").textContent = actCount > 99 ? "99+" : String(actCount); }
+  const totalBadge = totalUnreadMsgs > 0 ? totalUnreadMsgs : actCount;
+  if ($("inboxNavBadge")) {
+    $("inboxNavBadge").hidden = totalBadge === 0;
+    $("inboxNavBadge").textContent = totalBadge > 99 ? "99+" : String(totalBadge);
+  }
 
   const actRow = document.createElement("button"); actRow.type = "button"; actRow.className = "inbox-row";
   actRow.innerHTML = `<div class="inbox-row-main"><div class="inbox-avatar"><div class="inbox-avatar-inner pink-sys">⚡</div></div><div class="inbox-row-text"><strong>النشاط والمتابعون الجدد</strong><small>الإعجابات والمتابعات على منشوراتك</small></div></div><div class="inbox-row-side">${actCount ? `<span class="inbox-badge-red">${actCount}</span>` : ""}<span>‹</span></div>`;
@@ -1434,9 +1713,9 @@ function renderInbox() {
   pubRow.innerHTML = `<div class="inbox-row-main"><div class="inbox-avatar"><div class="inbox-avatar-inner pub-sys">🌐</div></div><div class="inbox-row-text"><strong>شات الأصدقاء العام</strong><small>${lastPub ? formatMsgPreview(lastPub) : "محادثة مفتوحة للجميع"}</small></div></div><div class="inbox-row-side"><span>📷</span></div>`;
   pubRow.onclick = () => openPrivateChat(null); list.appendChild(pubRow);
 
-  const others = Object.values(profilesMap).filter(p => p.id !== currentUser.id), lastMap = {};
-  allMessagesCache.forEach(m => { if (m.receiver_id === null) return; const oid = m.sender_id === currentUser.id ? m.receiver_id : m.sender_id; if (!lastMap[oid]) lastMap[oid] = m; });
   others.sort((a, b) => {
+    const ap = isUserPinned(a.id) ? 1 : 0, bp = isUserPinned(b.id) ? 1 : 0;
+    if (ap !== bp) return bp - ap;
     const al = liveRoomsCache.some(r => r.host_id === a.id) ? 1 : 0, bl = liveRoomsCache.some(r => r.host_id === b.id) ? 1 : 0;
     if (al !== bl) return bl - al;
     return (lastMap[b.id]?.created_at ? new Date(lastMap[b.id].created_at).getTime() : 0) - (lastMap[a.id]?.created_at ? new Date(lastMap[a.id].created_at).getTime() : 0);
@@ -1444,25 +1723,35 @@ function renderInbox() {
 
   others.forEach(friend => {
     const last = lastMap[friend.id], liveRoom = liveRoomsCache.find(r => r.host_id === friend.id), isOn = onlineUserIds.has(friend.id);
+    const unread = getUnreadCountForPeer(friend.id), blocked = isUserBlocked(friend.id), pinned = isUserPinned(friend.id);
     const row = document.createElement("div"); row.className = "inbox-row";
     const main = document.createElement("div"); main.className = "inbox-row-main";
-    const av = document.createElement("div"); av.className = "inbox-avatar " + (liveRoom ? "has-live" : (isOn ? "has-online" : ""));
+    const av = document.createElement("div"); av.className = "inbox-avatar " + (liveRoom && !blocked ? "has-live" : (isOn && !blocked ? "has-online" : ""));
     const avIn = document.createElement("div"); avIn.className = "inbox-avatar-inner"; setAvatarContent(avIn, friend.avatar_url, friend.username); av.appendChild(avIn);
-    if (liveRoom) {
+    if (liveRoom && !blocked) {
       const wv = document.createElement("span"); wv.className = "live-wave-badge"; wv.textContent = "|ı|"; av.appendChild(wv);
       av.onclick = e => { e.stopPropagation(); tryEnterLiveRoom(liveRoom); };
     } else {
-      if (isOn) { const dot = document.createElement("span"); dot.className = "online-dot-badge"; av.appendChild(dot); }
+      if (isOn && !blocked) { const dot = document.createElement("span"); dot.className = "online-dot-badge"; av.appendChild(dot); }
       av.onclick = e => { e.stopPropagation(); openUserProfile(friend.id); };
     }
     const txt = document.createElement("div"); txt.className = "inbox-row-text";
-    const st = document.createElement("strong"); st.textContent = friend.username;
+    const st = document.createElement("strong");
+    st.textContent = (pinned ? "📌 " : "") + friend.username + (blocked ? " (محظور)" : "");
+    if (unread > 0) st.classList.add("unread-bold");
+
     const sm = document.createElement("small");
-    if (liveRoom) sm.textContent = "في بث مباشر الآن — اضغط الصورة للدخول";
-    else if (last) sm.textContent = (last.sender_id === currentUser.id ? "تم الإرسال" : formatMsgPreview(last)) + " • " + formatRelTime(last.created_at);
-    else sm.textContent = "قل مرحبًا لـ " + friend.username;
+    if (blocked) sm.textContent = "حساب محظور";
+    else if (liveRoom) sm.textContent = "في بث مباشر الآن — اضغط الصورة للدخول";
+    else if (last) {
+      sm.textContent = (last.sender_id === currentUser.id ? "تم الإرسال: " + formatMsgPreview(last) : formatMsgPreview(last)) + " • " + formatRelTime(last.created_at);
+      if (unread > 0) sm.classList.add("unread-sub");
+    } else sm.textContent = "قل مرحبًا لـ " + friend.username;
+
     txt.append(st, sm); main.append(av, txt);
-    const side = document.createElement("div"); side.className = "inbox-row-side"; side.innerHTML = `<span>📷</span>`;
+    const side = document.createElement("div"); side.className = "inbox-row-side";
+    if (unread > 0) side.innerHTML = `<span class="inbox-badge-red">${unread}</span><span>📷</span>`;
+    else side.innerHTML = `<span>📷</span>`;
     row.append(main, side); row.onclick = () => openPrivateChat(friend.id); list.appendChild(row);
   });
 }
@@ -1476,9 +1765,23 @@ function formatMsgPreview(msg) {
   return p.text || "";
 }
 
+function refreshChatBlockedState() {
+  if (activeChatUserId === "__none__" || activeChatUserId === null) {
+    $("chatBlockedBanner").hidden = true; $("chatForm").hidden = false; $("chatQuickBar").hidden = false; return;
+  }
+  const blocked = isUserBlocked(activeChatUserId);
+  $("chatBlockedBanner").hidden = !blocked;
+  $("chatForm").hidden = blocked;
+  $("chatQuickBar").hidden = blocked;
+}
+
 function openPrivateChat(targetUserId) {
   if (!currentUser) return;
   activeChatUserId = targetUserId;
+  chatSearchQuery = ""; $("chatSearchBar").hidden = true; $("chatSearchInput").value = "";
+  markChatAsRead(targetUserId, Date.now());
+  renderInbox();
+
   if (targetUserId === null) {
     $("chatHeaderName").textContent = "شات الأصدقاء العام";
     $("chatHeaderSub").textContent = "مفتوح لجميع الأعضاء";
@@ -1486,9 +1789,10 @@ function openPrivateChat(targetUserId) {
   } else {
     const f = profilesMap[targetUserId] || {}, live = liveRoomsCache.find(r => r.host_id === targetUserId);
     $("chatHeaderName").textContent = f.username || "صديق";
-    $("chatHeaderSub").textContent = live ? "🔴 في بث مباشر الآن" : (onlineUserIds.has(targetUserId) ? "🟢 نشط الآن" : (f.country || "غير متصل"));
+    $("chatHeaderSub").textContent = isUserBlocked(targetUserId) ? "🚫 حساب محظور" : (live ? "🔴 في بث مباشر الآن" : (onlineUserIds.has(targetUserId) ? "🟢 نشط الآن" : (f.country || "غير متصل")));
     setAvatarContent($("chatHeaderAvatar"), f.avatar_url, f.username);
   }
+  refreshChatBlockedState();
   $("chatEmojiBar").hidden = true; $("chatVoiceBar").hidden = true;
   $("chatSendBtn").hidden = false;
   $("dzChatRoom").hidden = false;
@@ -1496,7 +1800,7 @@ function openPrivateChat(targetUserId) {
 }
 
 function closePrivateChat() {
-  stopVoiceRecorder(false); activeChatUserId = "__none__"; $("dzChatRoom").hidden = true;
+  stopVoiceRecorder(false); activeChatUserId = "__none__"; $("dzChatRoom").hidden = true; $("dzChatSettingsModal").hidden = true;
 }
 
 $("chatBackBtn").addEventListener("click", closePrivateChat);
@@ -1506,7 +1810,84 @@ $("chatCallBtn").addEventListener("click", () => {
   const live = activeChatUserId && liveRoomsCache.find(r => r.host_id === activeChatUserId);
   if (live) { closePrivateChat(); tryEnterLiveRoom(live); } else { closePrivateChat(); $("dzLiveSetupModal").hidden = false; }
 });
-$("chatMoreBtn").addEventListener("click", () => showToast("اضغط على أي رسالة للتفاعل ❤️ أو الإلغاء"));
+$("chatUnblockQuickBtn").addEventListener("click", () => {
+  if (activeChatUserId && activeChatUserId !== "__none__") {
+    setUserChatPref(activeChatUserId, { blocked: false });
+    refreshChatBlockedState(); renderInbox(); renderVideoFeed(); renderFriendsFeed();
+    showToast("تم إلغاء حظر الحساب ✅");
+  }
+});
+
+/* === صفحة إعدادات الخاص (النقاط الثلاث) === */
+function openChatSettingsModal() {
+  if (!currentUser || activeChatUserId === "__none__") return;
+  if (activeChatUserId === null) {
+    showToast("الشات العام مفتوح للجميع — اضغط مطولاً على أي رسالة للتعديل أو الحذف");
+    return;
+  }
+  const f = profilesMap[activeChatUserId] || {}, prefs = getUserChatPrefs(activeChatUserId);
+  setAvatarContent($("csAvatar"), f.avatar_url, f.username);
+  $("csDisplayName").textContent = (f.username || "صديق").toUpperCase();
+  $("csToggleNotifyAll").checked = !!prefs.notifyAll;
+  $("csToggleMuteMsgs").checked = !!prefs.muteMsgs;
+  $("csToggleMuteCalls").checked = !!prefs.muteCalls;
+  $("csTogglePin").checked = !!prefs.pinned;
+  $("csBlockAccountText").textContent = prefs.blocked ? "إلغاء حظر الحساب" : "حظر الحساب";
+  $("dzChatSettingsModal").hidden = false;
+}
+$("chatMoreBtn").addEventListener("click", openChatSettingsModal);
+$("csBackBtn").addEventListener("click", () => { $("dzChatSettingsModal").hidden = true; });
+$("csMoreDotBtn").addEventListener("click", () => { $("dzChatSettingsModal").hidden = true; });
+$("csSearchChatBtn").addEventListener("click", () => {
+  $("dzChatSettingsModal").hidden = true; $("chatSearchBar").hidden = false; $("chatSearchInput").focus();
+});
+$("csViewProfileBtn").addEventListener("click", () => {
+  const id = activeChatUserId; $("dzChatSettingsModal").hidden = true;
+  if (id) openUserProfile(id);
+});
+$("csCreateGroupBtn").addEventListener("click", () => {
+  $("dzChatSettingsModal").hidden = true; closePrivateChat(); $("dzLiveSetupModal").hidden = false;
+});
+$("csToggleNotifyAll").addEventListener("change", async e => {
+  if (!activeChatUserId || activeChatUserId === "__none__") return;
+  setUserChatPref(activeChatUserId, { notifyAll: e.target.checked });
+  if (e.target.checked && "Notification" in window && Notification.permission === "default") {
+    try { await Notification.requestPermission(); refreshNotifyBtnVisibility(); } catch {}
+  }
+  showToast(e.target.checked ? "تم تفعيل متابعة كل إشعارات الحساب 🔔" : "تم إيقاف متابعة إشعارات الحساب");
+});
+$("csToggleMuteMsgs").addEventListener("change", e => {
+  if (!activeChatUserId || activeChatUserId === "__none__") return;
+  setUserChatPref(activeChatUserId, { muteMsgs: e.target.checked });
+  showToast(e.target.checked ? "تم حظر/كتم رسائل هذا الصديق 🔕" : "تم السماح بإشعارات الرسائل");
+});
+$("csToggleMuteCalls").addEventListener("change", e => {
+  if (!activeChatUserId || activeChatUserId === "__none__") return;
+  setUserChatPref(activeChatUserId, { muteCalls: e.target.checked });
+  showToast(e.target.checked ? "تم كتم المكالمات والبث 📞" : "تم تفعيل إشعارات المكالمات");
+});
+$("csTogglePin").addEventListener("change", e => {
+  if (!activeChatUserId || activeChatUserId === "__none__") return;
+  setUserChatPref(activeChatUserId, { pinned: e.target.checked });
+  renderInbox();
+  showToast(e.target.checked ? "تم تثبيت المحادثة في الأعلى 📌" : "تم إلغاء التثبيت");
+});
+$("csBlockAccountBtn").addEventListener("click", () => {
+  if (!activeChatUserId || activeChatUserId === "__none__") return;
+  const f = profilesMap[activeChatUserId] || {}, currentlyBlocked = isUserBlocked(activeChatUserId);
+  if (!currentlyBlocked && !confirm(`هل تريد حظر حساب @${f.username || "هذا المستخدم"}؟`)) return;
+  const next = !currentlyBlocked;
+  setUserChatPref(activeChatUserId, { blocked: next });
+  $("csBlockAccountText").textContent = next ? "إلغاء حظر الحساب" : "حظر الحساب";
+  refreshChatBlockedState();
+  renderInbox(); renderVideoFeed(); renderFriendsFeed();
+  $("dzChatSettingsModal").hidden = true;
+  showToast(next ? "تم حظر الحساب 🚫" : "تم إلغاء حظر الحساب ✅");
+});
+
+$("chatSearchInput").addEventListener("input", () => { chatSearchQuery = $("chatSearchInput").value.trim().toLowerCase(); loadMessages(); });
+$("chatSearchCloseBtn").addEventListener("click", () => { chatSearchQuery = ""; $("chatSearchInput").value = ""; $("chatSearchBar").hidden = true; loadMessages(); });
+
 $("chatEmojiBtn").addEventListener("click", () => { $("chatEmojiBar").hidden = !$("chatEmojiBar").hidden; });
 $("chatEmojiBar").addEventListener("click", e => {
   const btn = e.target.closest(".dm-emoji-item"); if (!btn) return;
@@ -1606,6 +1987,7 @@ $("chatVoiceSendBtn").addEventListener("click", () => stopVoiceRecorder(true));
 
 async function sendRawMessage(content) {
   if (!currentUser || activeChatUserId === "__none__") return;
+  if (activeChatUserId !== null && isUserBlocked(activeChatUserId)) { showToast("هذا الحساب محظور"); return; }
   const targetId = activeChatUserId;
   const { error } = await db.from("messages").insert({ sender_id: currentUser.id, receiver_id: targetId, content });
   if (error) {
@@ -1621,19 +2003,86 @@ $("chatForm").addEventListener("submit", async e => {
   await sendRawMessage(content);
 });
 
+/* === الضغط المطوّل على الرسالة (تعديل / حذف / تفاعل / نسخ) === */
+function openMsgActionModal(msg, parsed, isMine) {
+  activeActionMsg = msg;
+  activeActionMsgParsed = parsed;
+  const canEdit = isMine && parsed.kind === "text";
+  $("msgEditSection").hidden = !canEdit;
+  if (canEdit) $("msgEditInput").value = parsed.text || "";
+  $("msgCopyBtn").hidden = parsed.kind !== "text";
+  $("msgDeleteBtn").hidden = !isMine;
+  $("dzMsgActionModal").hidden = false;
+}
+$("msgActionCloseBtn").addEventListener("click", () => { $("dzMsgActionModal").hidden = true; });
+$("dzMsgActionModal").addEventListener("click", e => { if (e.target === $("dzMsgActionModal")) $("dzMsgActionModal").hidden = true; });
+
+$("msgReactBar").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-react]"); if (!btn || !activeActionMsg) return;
+  const emoji = btn.dataset.react, p = activeActionMsgParsed;
+  const nr = p.react === emoji ? "" : emoji;
+  let uc = null;
+  if (p.kind === "text") uc = JSON.stringify({ dz_txt: true, text: p.text, react: nr, edited: !!p.edited });
+  else if (p.kind === "image") uc = JSON.stringify({ dz_img: true, url: p.url, react: nr });
+  else if (p.kind === "voice") uc = JSON.stringify({ dz_voice: true, url: p.url, dur: p.dur, react: nr });
+  $("dzMsgActionModal").hidden = true;
+  if (!uc) return;
+  const { error } = await db.from("messages").update({ content: uc }).eq("id", activeActionMsg.id);
+  if (error) showToast("لتفعيل التفاعل فعّل UPDATE لجدول messages في Supabase");
+  else await loadMessages();
+});
+
+$("msgEditSaveBtn").addEventListener("click", async () => {
+  if (!activeActionMsg || activeActionMsgParsed?.kind !== "text") return;
+  const newText = $("msgEditInput").value.trim(); if (!newText) return;
+  const uc = JSON.stringify({ dz_txt: true, text: newText, react: activeActionMsgParsed.react || "", edited: true });
+  const { error } = await db.from("messages").update({ content: uc }).eq("id", activeActionMsg.id);
+  $("dzMsgActionModal").hidden = true;
+  if (error) showToast("لتعديل الرسالة فعّل UPDATE لجدول messages في Supabase");
+  else { showToast("تم تعديل الرسالة ✅"); await loadMessages(); refreshAllData(false); }
+});
+
+$("msgCopyBtn").addEventListener("click", async () => {
+  if (activeActionMsgParsed?.text) { try { await navigator.clipboard.writeText(activeActionMsgParsed.text); } catch {} }
+  $("dzMsgActionModal").hidden = true;
+  showToast("تم نسخ النص 📋");
+});
+
+$("msgDeleteBtn").addEventListener("click", async () => {
+  if (!activeActionMsg) return;
+  const { error } = await db.from("messages").delete().eq("id", activeActionMsg.id);
+  $("dzMsgActionModal").hidden = true;
+  if (error) showToast("لتفعيل الحذف فعّل DELETE لجدول messages في Supabase");
+  else { showToast("تم حذف الرسالة 🗑️"); await loadMessages(); refreshAllData(false); }
+});
+
 async function loadMessages() {
   if (!currentUser || activeChatUserId === "__none__") return;
   const reqId = activeChatUserId, box = $("chatMessages");
-  let query = db.from("messages").select("*").order("created_at", { ascending: true }).limit(100);
+  let query = db.from("messages").select("*").order("created_at", { ascending: true }).limit(120);
   if (reqId === null) query = query.is("receiver_id", null);
   else query = query.or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${reqId}),and(sender_id.eq.${reqId},receiver_id.eq.${currentUser.id})`);
   const { data, error } = await query;
   if (activeChatUserId !== reqId) return;
   if (error) { showToast("تعذر تحميل الرسائل: " + error.message); return; }
-  box.textContent = "";
-  if (!data.length) { box.innerHTML = `<div class="dm-sys-notice">لا توجد رسائل بعد. قل مرحباً! 👋</div>`; return; }
 
-  data.forEach(m => {
+  const latestTs = (data && data.length) ? new Date(data[data.length - 1].created_at).getTime() : Date.now();
+  markChatAsRead(reqId, Math.max(Date.now(), latestTs));
+  renderInbox();
+
+  box.textContent = "";
+  const filtered = (data || []).filter(m => {
+    if (reqId === null && isUserBlocked(m.sender_id)) return false;
+    if (!chatSearchQuery) return true;
+    return formatMsgPreview(m).toLowerCase().includes(chatSearchQuery);
+  });
+
+  if (!filtered.length) {
+    box.innerHTML = `<div class="dm-sys-notice">${chatSearchQuery ? "لا توجد رسائل مطابقة للبحث." : "لا توجد رسائل بعد. قل مرحباً! 👋"}</div>`;
+    return;
+  }
+
+  filtered.forEach(m => {
     const isMine = m.sender_id === currentUser.id, row = document.createElement("div");
     row.className = "dm-row " + (isMine ? "mine" : "theirs");
     if (!isMine) {
@@ -1678,34 +2127,16 @@ async function loadMessages() {
         const tag = document.createElement("span"); tag.className = "dm-sender-tag";
         tag.textContent = "@" + (profilesMap[m.sender_id]?.username || "عضو"); b.appendChild(tag);
       }
-      const sp = document.createElement("span"); sp.textContent = parsed.text; b.appendChild(sp); wrap.appendChild(b);
+      const sp = document.createElement("span"); sp.textContent = parsed.text; b.appendChild(sp);
+      if (parsed.edited) {
+        const ed = document.createElement("span"); ed.className = "dm-edited-tag"; ed.textContent = "(معدلة)"; b.appendChild(ed);
+      }
+      wrap.appendChild(b);
     }
 
     if (parsed.react) { const rp = document.createElement("span"); rp.className = "dm-react-pill"; rp.textContent = parsed.react; wrap.appendChild(rp); }
 
-    const acts = document.createElement("div"); acts.className = "dm-bubble-actions"; acts.hidden = true;
-    const hb = document.createElement("button"); hb.type = "button"; hb.textContent = "❤️ تفاعل";
-    hb.onclick = async () => {
-      const nr = parsed.react === "❤️" ? "" : "❤️";
-      let uc = null;
-      if (parsed.kind === "text") uc = JSON.stringify({ dz_txt: true, text: parsed.text, react: nr });
-      else if (parsed.kind === "image") uc = JSON.stringify({ dz_img: true, url: parsed.url, react: nr });
-      else if (parsed.kind === "voice") uc = JSON.stringify({ dz_voice: true, url: parsed.url, dur: parsed.dur, react: nr });
-      if (!uc) return;
-      const { error: uErr } = await db.from("messages").update({ content: uc }).eq("id", m.id);
-      if (uErr) showToast("لتفعيل التفاعل فعّل UPDATE لجدول messages"); else await loadMessages();
-    };
-    acts.appendChild(hb);
-    if (isMine) {
-      const ub = document.createElement("button"); ub.type = "button"; ub.textContent = "🗑️ إلغاء الإرسال";
-      ub.onclick = async () => {
-        const { error: dErr } = await db.from("messages").delete().eq("id", m.id);
-        if (dErr) showToast("لتفعيل الإلغاء فعّل DELETE لجدول messages"); else await loadMessages();
-      };
-      acts.appendChild(ub);
-    }
-    wrap.appendChild(acts);
-    wrap.onclick = ev => { if (ev.target.tagName !== "BUTTON" && ev.target.tagName !== "AUDIO") acts.hidden = !acts.hidden; };
+    attachLongPress(wrap, () => openMsgActionModal(m, parsed, isMine));
     row.appendChild(wrap); box.appendChild(row);
   });
   box.scrollTop = box.scrollHeight;
@@ -1723,9 +2154,11 @@ function subscribeRealtimeAll() {
       if (payload.eventType === "INSERT" && msg && msg.sender_id && msg.sender_id !== currentUser.id) {
         const isPrivateForMe = msg.receiver_id === currentUser.id;
         const viewingThisSender = activeChatUserId === msg.sender_id;
-        if (isPrivateForMe && !viewingThisSender) {
+        const blockedOrMuted = isUserMsgMuted(msg.sender_id);
+
+        if (isPrivateForMe && !viewingThisSender && !blockedOrMuted) {
           showTopMessageNotification(profilesMap[msg.sender_id], formatMsgPreview(msg), msg.sender_id);
-        } else if (msg.receiver_id === null && activeChatUserId !== null) {
+        } else if (msg.receiver_id === null && activeChatUserId !== null && !isUserBlocked(msg.sender_id)) {
           showTopMessageNotification(profilesMap[msg.sender_id], "في الشات العام: " + formatMsgPreview(msg), null);
         }
       }
@@ -1749,13 +2182,22 @@ function subscribeRealtimeAll() {
           const { data: fp } = await db.from("profiles").select("*").eq("id", fid).maybeSingle();
           if (fp) profilesMap[fp.id] = fp;
         }
-        playMsgNotificationSound();
-        showToast(`👤 بدأ @${profilesMap[fid]?.username || "عضو"} بمتابعتك!`);
+        if (!isUserBlocked(fid)) {
+          playMsgNotificationSound();
+          showToast(`👤 بدأ @${profilesMap[fid]?.username || "عضو"} بمتابعتك!`);
+        }
       }
       renderProfile(); renderInbox();
       if (!$("dzFollowsModal").hidden) renderFollowsList();
     })
-    .on("postgres_changes", { event: "*", schema: "public", table: "videos" }, async () => { await refreshAllData(true); })
+    .on("postgres_changes", { event: "*", schema: "public", table: "videos" }, async payload => {
+      await refreshAllData(true);
+      if (payload.eventType === "INSERT" && currentUser && payload.new?.user_id && payload.new.user_id !== currentUser.id && isUserNotifyAll(payload.new.user_id)) {
+        const author = profilesMap[payload.new.user_id];
+        playMsgNotificationSound();
+        showToast(`🔔 نشر @${author?.username || "صديق"} منشوراً جديداً!`);
+      }
+    })
     .on("postgres_changes", { event: "*", schema: "public", table: "live_rooms" }, async () => {
       const { data } = await db.from("live_rooms").select("*").eq("is_active", true).order("created_at", { ascending: false });
       liveRoomsCache = data || [];
@@ -1764,7 +2206,7 @@ function subscribeRealtimeAll() {
       for (const r of liveRoomsCache) {
         if (!knownLiveRoomIds.has(r.id)) {
           knownLiveRoomIds.add(r.id);
-          if (currentUser && r.host_id && r.host_id !== currentUser.id) {
+          if (currentUser && r.host_id && r.host_id !== currentUser.id && !isUserCallMuted(r.host_id)) {
             if (!profilesMap[r.host_id]) {
               const { data: hp } = await db.from("profiles").select("*").eq("id", r.host_id).maybeSingle();
               if (hp) profilesMap[hp.id] = hp;
@@ -1787,7 +2229,7 @@ $("searchCloseBtn").addEventListener("click", () => { $("dzSearchModal").hidden 
 function renderDiscoverSearch() {
   const q = $("searchInput").value.trim().toLowerCase(), container = $("discoverResults"); container.textContent = "";
   const mu = Object.values(profilesMap).filter(p => currentUser && p.id !== currentUser.id && (p.username || "").toLowerCase().includes(q));
-  const mv = videosCache.filter(v => (profilesMap[v.user_id]?.username || "").toLowerCase().includes(q) || (v.caption || "").toLowerCase().includes(q));
+  const mv = videosCache.filter(v => !isUserBlocked(v.user_id) && ((profilesMap[v.user_id]?.username || "").toLowerCase().includes(q) || (v.caption || "").toLowerCase().includes(q)));
   if (!mu.length && !mv.length) { container.innerHTML = `<div class="discover-box"><div>🇩🇿</div><h3>لا توجد نتائج</h3></div>`; return; }
   mu.forEach(user => {
     const row = document.createElement("div"); row.className = "discover-item";
@@ -1820,7 +2262,11 @@ function closeUserProfile() { viewedUserProfileId = null; $("dzUserProfileModal"
 $("userProfBackBtn").addEventListener("click", closeUserProfile);
 $("userProfBellBtn").addEventListener("click", async () => {
   if ("Notification" in window && Notification.permission === "default") { try { await Notification.requestPermission(); refreshNotifyBtnVisibility(); } catch {} }
-  showToast("تم تفعيل إشعارات هذا الحساب 🔔");
+  if (viewedUserProfileId) {
+    const next = !isUserNotifyAll(viewedUserProfileId);
+    setUserChatPref(viewedUserProfileId, { notifyAll: next });
+    showToast(next ? "تم تفعيل إشعارات هذا الحساب 🔔" : "تم إيقاف إشعارات هذا الحساب");
+  }
 });
 $("userProfShareBtn").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText("@" + (profilesMap[viewedUserProfileId]?.username || "user")); } catch {}
@@ -2010,6 +2456,7 @@ $("dzSaveProfile").addEventListener("click", async () => {
 });
 
 attachSwipeBack($("dzChatRoom"), closePrivateChat);
+attachSwipeBack($("dzChatSettingsModal"), () => { $("dzChatSettingsModal").hidden = true; });
 attachSwipeBack($("dzFollowsModal"), () => { $("dzFollowsModal").hidden = true; });
 attachSwipeBack($("dzUserProfileModal"), closeUserProfile);
 attachSwipeBack($("dzSearchModal"), () => { $("dzSearchModal").hidden = true; });
