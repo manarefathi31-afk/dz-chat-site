@@ -22,8 +22,9 @@ let feedObserver = null, friendsFeedObserver = null;
 
 let activeLiveRoom = null, selectedLiveMode = "video", pendingPinRoom = null;
 let liveSeatsCache = [], liveCommentsCache = [], liveRoomChannel = null;
-let localMediaStream = null, peerConnections = {}, pendingIceCandidates = {}, remoteMediaStreams = {}, amISpeakerNow = false;
-let myLiveSessionSeq = 1, knownLiveRoomIds = new Set(), initialRoomsLoaded = false;
+let localMediaStream = null, remoteMediaStreams = {}, amISpeakerNow = false;
+let livekitRoom = null, liveMusicAudioTrack = null, liveSpeakerSyncLock = false;
+let knownLiveRoomIds = new Set(), initialRoomsLoaded = false;
 let isMicMuted = false, isCamEnabled = true, currentCamFacing = "user";
 let seatDecorMap = {}, mySeatDecorUrl = "";
 let liveMusicAudio = null, liveAudioCtx = null, liveMixedDest = null, notifyAudioCtx = null;
@@ -472,8 +473,11 @@ function switchPage(pageId) {
   if (pageId === "profilePage") renderProfile();
 }
 
-function unlockLiveAudioPool() {
+async function unlockLiveAudioPool() {
   unlockNotifyAudio();
+  if (livekitRoom) {
+    try { await livekitRoom.startAudio(); } catch {}
+  }
   let blocked = false;
   $("liveAudioPool").querySelectorAll("audio").forEach(a => {
     a.muted = false; a.volume = 1;
@@ -482,7 +486,7 @@ function unlockLiveAudioPool() {
       if (p && p.catch) p.catch(() => { blocked = true; liveAudioUnlockBtn.hidden = false; });
     }
   });
-  if (!blocked) liveAudioUnlockBtn.hidden = true;
+  if (!blocked && (!livekitRoom || livekitRoom.canPlaybackAudio)) liveAudioUnlockBtn.hidden = true;
 }
 liveAudioUnlockBtn.addEventListener("click", unlockLiveAudioPool);
 if (liveRoomEl) {
@@ -689,7 +693,7 @@ async function clearMySeatDecor() {
   mySeatDecorUrl = "";
   if (currentUser) delete seatDecorMap[currentUser.id];
   if (liveRoomChannel && currentUser) {
-    await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, sid: myLiveSessionSeq, decor: "" });
+    await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, decor: "" });
   }
   renderLiveSeatsAndControls();
   showToast("تمت إزالة صورة المقعد");
@@ -775,67 +779,199 @@ function renderLiveSeatsAndControls() {
   }
 }
 
-async function attachOrReplaceVideoTrack(vt) {
-  for (const [pid, pc] of Object.entries(peerConnections)) {
+/* === محرك LiveKit للصوت والفيديو المباشر === */
+async function fetchLiveKitToken(roomId) {
+  const { data, error } = await db.functions.invoke("livekit-token", {
+    body: { room_id: roomId }
+  });
+  if (error) {
+    let msg = error.message || "تعذر الاتصال بوظيفة livekit-token";
     try {
-      const vidTransceiver = pc.getTransceivers().find(t =>
-        (t.sender?.track?.kind === "video") || (t.receiver?.track?.kind === "video")
-      );
-      if (vidTransceiver) {
-        if (vidTransceiver.direction === "recvonly" || vidTransceiver.direction === "inactive") {
-          vidTransceiver.direction = "sendrecv";
-        }
-        await vidTransceiver.sender.replaceTrack(vt);
-        if (pc.signalingState === "stable" && liveRoomChannel) {
-          const o = await pc.createOffer();
-          await pc.setLocalDescription(o);
-          liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: pid, from: currentUser.id, sdp: pc.localDescription, sid: myLiveSessionSeq } });
-        }
-      } else {
-        pc.addTrack(vt, localMediaStream);
-        if (pc.signalingState === "stable" && liveRoomChannel) {
-          const o = await pc.createOffer();
-          await pc.setLocalDescription(o);
-          liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: pid, from: currentUser.id, sdp: pc.localDescription, sid: myLiveSessionSeq } });
-        }
+      if (error.context && typeof error.context.json === "function") {
+        const errBody = await error.context.json();
+        if (errBody?.error) msg = errBody.error;
       }
     } catch {}
+    throw new Error(msg);
+  }
+  if (!data?.token || !data?.url) {
+    throw new Error(data?.error || "مفاتيح LiveKit غير مضبوطة في Supabase");
+  }
+  return data;
+}
+
+function syncLocalMediaStreamFromLiveKit() {
+  if (!livekitRoom?.localParticipant) { localMediaStream = null; return; }
+  const tracks = [];
+  const micPub = livekitRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Microphone);
+  const camPub = livekitRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera);
+  if (micPub?.track?.mediaStreamTrack) tracks.push(micPub.track.mediaStreamTrack);
+  if (camPub?.track?.mediaStreamTrack && isCamEnabled) tracks.push(camPub.track.mediaStreamTrack);
+  localMediaStream = tracks.length ? new MediaStream(tracks) : null;
+}
+
+async function disconnectLiveKitOnly() {
+  if (liveMusicAudioTrack && livekitRoom?.localParticipant) {
+    try { await livekitRoom.localParticipant.unpublishTrack(liveMusicAudioTrack); } catch {}
+  }
+  liveMusicAudioTrack = null;
+  if (livekitRoom) {
+    try { await livekitRoom.disconnect(); } catch {}
+    livekitRoom = null;
+  }
+  localMediaStream = null;
+  remoteMediaStreams = {};
+  $("liveAudioPool").textContent = "";
+}
+
+async function connectLiveKitRoom(roomId) {
+  if (!window.LivekitClient) {
+    showToast("تأكد من إضافة سطر مكتبة LiveKit في index.html");
+    return;
+  }
+  if (!activeLiveRoom || activeLiveRoom.id !== roomId || !currentUser) return;
+
+  await disconnectLiveKitOnly();
+
+  const isHost = activeLiveRoom.host_id === currentUser.id;
+  const mySeat = liveSeatsCache.find(s => s.user_id === currentUser.id && s.status === "seated");
+  amISpeakerNow = isHost || !!mySeat;
+
+  let creds;
+  try {
+    creds = await fetchLiveKitToken(roomId);
+  } catch (err) {
+    showToast("❌ خطأ LiveKit: " + (err.message || err));
+    return;
+  }
+
+  if (!activeLiveRoom || activeLiveRoom.id !== roomId) return;
+
+  const lkRoom = new LivekitClient.Room({
+    adaptiveStream: true,
+    dynacast: true,
+    audioCaptureDefaults: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    },
+    videoCaptureDefaults: {
+      resolution: LivekitClient.VideoPresets.h720.resolution
+    }
+  });
+  livekitRoom = lkRoom;
+
+  lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    if (livekitRoom !== lkRoom) return;
+    const uid = participant.identity;
+    if (track.kind === LivekitClient.Track.Kind.Audio) {
+      const audioEl = track.attach();
+      audioEl.id = "aud_" + (track.sid || uid);
+      audioEl.autoplay = true;
+      audioEl.playsInline = true;
+      audioEl.muted = false;
+      audioEl.volume = 1;
+      $("liveAudioPool").appendChild(audioEl);
+      const p = audioEl.play();
+      if (p && p.catch) p.catch(() => { liveAudioUnlockBtn.hidden = false; });
+    } else if (track.kind === LivekitClient.Track.Kind.Video) {
+      if (!remoteMediaStreams[uid]) remoteMediaStreams[uid] = new MediaStream();
+      const rs = remoteMediaStreams[uid];
+      rs.getVideoTracks().forEach(t => rs.removeTrack(t));
+      if (track.mediaStreamTrack) rs.addTrack(track.mediaStreamTrack);
+      renderLiveSeatsAndControls();
+    }
+  });
+
+  lkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+    const uid = participant.identity;
+    if (track.kind === LivekitClient.Track.Kind.Audio) {
+      track.detach().forEach(el => el.remove());
+    } else if (track.kind === LivekitClient.Track.Kind.Video) {
+      if (remoteMediaStreams[uid]) {
+        remoteMediaStreams[uid].getVideoTracks().forEach(t => remoteMediaStreams[uid].removeTrack(t));
+      }
+      renderLiveSeatsAndControls();
+    }
+  });
+
+  lkRoom.on(LivekitClient.RoomEvent.ParticipantDisconnected, participant => {
+    delete remoteMediaStreams[participant.identity];
+    renderLiveSeatsAndControls();
+  });
+
+  lkRoom.on(LivekitClient.RoomEvent.AudioPlaybackStatusChanged, () => {
+    liveAudioUnlockBtn.hidden = lkRoom.canPlaybackAudio;
+  });
+
+  lkRoom.on(LivekitClient.RoomEvent.LocalTrackPublished, () => {
+    syncLocalMediaStreamFromLiveKit();
+    renderLiveSeatsAndControls();
+  });
+
+  lkRoom.on(LivekitClient.RoomEvent.LocalTrackUnpublished, () => {
+    syncLocalMediaStreamFromLiveKit();
+    renderLiveSeatsAndControls();
+  });
+
+  try {
+    await lkRoom.connect(creds.url, creds.token);
+    if (livekitRoom !== lkRoom) { try { await lkRoom.disconnect(); } catch {} return; }
+    try { await lkRoom.startAudio(); } catch {}
+    if (!lkRoom.canPlaybackAudio) liveAudioUnlockBtn.hidden = false;
+
+    if (amISpeakerNow) {
+      if (!isHost && mySeat) isMicMuted = !!mySeat.is_muted;
+      try {
+        await lkRoom.localParticipant.setMicrophoneEnabled(!isMicMuted);
+      } catch {
+        showToast("تأكد من منح إذن الميكروفون للمتصفح");
+      }
+      if (isCamEnabled) {
+        try {
+          await lkRoom.localParticipant.setCameraEnabled(true, { facingMode: currentCamFacing });
+        } catch {
+          isCamEnabled = false;
+        }
+      }
+      syncLocalMediaStreamFromLiveKit();
+      renderLiveSeatsAndControls();
+      if (liveMusicAudio && !liveMusicAudio.paused) await mixMusicIntoPeers();
+    }
+  } catch (err) {
+    showToast("❌ تعذر الاتصال بالبث الصوتي: " + (err.message || err));
   }
 }
 
 async function toggleSeatCamera() {
-  if (!activeLiveRoom || !currentUser) return;
+  if (!activeLiveRoom || !currentUser || !livekitRoom) return;
   if (isCamEnabled) {
     isCamEnabled = false;
-    if (localMediaStream) localMediaStream.getVideoTracks().forEach(t => { t.stop(); localMediaStream.removeTrack(t); });
-    Object.values(peerConnections).forEach(pc => {
-      const s = pc.getSenders().find(x => x.track?.kind === "video");
-      if (s) s.replaceTrack(null).catch(() => {});
-    });
+    try { await livekitRoom.localParticipant.setCameraEnabled(false); } catch {}
+    syncLocalMediaStreamFromLiveKit();
     renderLiveSeatsAndControls(); showToast("تم غلق الكاميرا 📷"); return;
   }
   try {
-    const vs = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: currentCamFacing } } });
-    const vt = vs.getVideoTracks()[0];
-    if (!localMediaStream) localMediaStream = new MediaStream();
-    localMediaStream.getVideoTracks().forEach(t => { t.stop(); localMediaStream.removeTrack(t); });
-    localMediaStream.addTrack(vt); isCamEnabled = true;
-    await attachOrReplaceVideoTrack(vt);
+    await livekitRoom.localParticipant.setCameraEnabled(true, { facingMode: currentCamFacing });
+    isCamEnabled = true;
+    syncLocalMediaStreamFromLiveKit();
     renderLiveSeatsAndControls(); showToast("تم فتح الكاميرا 📹");
   } catch { showToast("تعذر تشغيل الكاميرا"); }
 }
 
 async function flipSeatCamera() {
-  if (!activeLiveRoom || !currentUser) return;
+  if (!activeLiveRoom || !currentUser || !livekitRoom) return;
   currentCamFacing = currentCamFacing === "user" ? "environment" : "user";
   if (!isCamEnabled) { await toggleSeatCamera(); return; }
   try {
-    if (localMediaStream) localMediaStream.getVideoTracks().forEach(t => { t.stop(); localMediaStream.removeTrack(t); });
-    const vs = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: currentCamFacing } } });
-    const nt = vs.getVideoTracks()[0];
-    if (!localMediaStream) localMediaStream = new MediaStream();
-    localMediaStream.addTrack(nt);
-    await attachOrReplaceVideoTrack(nt);
+    const camPub = livekitRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera);
+    if (camPub?.track?.restartTrack) {
+      await camPub.track.restartTrack({ facingMode: currentCamFacing });
+    } else {
+      await livekitRoom.localParticipant.setCameraEnabled(false);
+      await livekitRoom.localParticipant.setCameraEnabled(true, { facingMode: currentCamFacing });
+    }
+    syncLocalMediaStreamFromLiveKit();
     renderLiveSeatsAndControls(); showToast(currentCamFacing === "user" ? "الكاميرا الأمامية 🤳" : "الكاميرا الخلفية 📷");
   } catch { showToast("تعذر تبديل الكاميرا"); }
 }
@@ -852,10 +988,11 @@ seatPhotoInput.addEventListener("change", async e => {
     mySeatDecorUrl = url;
     seatDecorMap[currentUser.id] = url;
     isCamEnabled = false;
-    if (localMediaStream) localMediaStream.getVideoTracks().forEach(t => { t.stop(); localMediaStream.removeTrack(t); });
+    if (livekitRoom) await livekitRoom.localParticipant.setCameraEnabled(false).catch(() => {});
+    syncLocalMediaStreamFromLiveKit();
     if (liveRoomChannel) {
       liveRoomChannel.send({ type: "broadcast", event: "seat-decor", payload: { user_id: currentUser.id, url } });
-      await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, sid: myLiveSessionSeq, decor: url });
+      await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, decor: url });
     }
     renderLiveSeatsAndControls(); showToast("تم تزيين المقعد بالصورة ✅");
   } catch (err) { showToast("تعذر وضع الصورة: " + err.message); }
@@ -899,7 +1036,10 @@ async function removeSeatRow(userId) {
 
 async function toggleMyLiveMic() {
   isMicMuted = !isMicMuted;
-  if (localMediaStream) localMediaStream.getAudioTracks().forEach(t => { t.enabled = !isMicMuted; });
+  if (livekitRoom && amISpeakerNow) {
+    try { await livekitRoom.localParticipant.setMicrophoneEnabled(!isMicMuted); }
+    catch (err) { showToast("تعذر التحكم بالمايك: " + (err.message || "")); }
+  }
   if (activeLiveRoom && currentUser && activeLiveRoom.host_id !== currentUser.id) {
     await db.from("live_seats").update({ is_muted: isMicMuted }).match({ room_id: activeLiveRoom.id, user_id: currentUser.id });
   }
@@ -955,8 +1095,12 @@ $("liveSaveSettingsBtn").addEventListener("click", async () => {
   showToast(pin ? "تم قفل الغرفة بالمفتاح السري 🔒" : "الغرفة الآن مفتوحة بدون رمز 🔓");
 });
 
-$("liveMusicFile").addEventListener("change", e => {
+$("liveMusicFile").addEventListener("change", async e => {
   const file = e.target.files[0]; if (!file) return;
+  if (liveMusicAudioTrack && livekitRoom?.localParticipant) {
+    try { await livekitRoom.localParticipant.unpublishTrack(liveMusicAudioTrack); } catch {}
+    liveMusicAudioTrack = null;
+  }
   if (liveMusicAudio) { liveMusicAudio.pause(); liveMusicAudio = null; }
   liveMusicAudio = new Audio(URL.createObjectURL(file)); liveMusicAudio.loop = true;
   liveMusicAudio.volume = parseFloat($("liveMusicVol").value || "0.4");
@@ -965,22 +1109,36 @@ $("liveMusicFile").addEventListener("change", e => {
 });
 $("liveMusicToggleBtn").addEventListener("click", () => {
   if (!liveMusicAudio) return;
-  if (liveMusicAudio.paused) { liveMusicAudio.play().catch(() => {}); $("liveMusicToggleBtn").textContent = "⏸️ إيقاف الموسيقى"; }
-  else { liveMusicAudio.pause(); $("liveMusicToggleBtn").textContent = "▶️ تشغيل الموسيقى"; }
+  if (liveMusicAudio.paused) {
+    liveMusicAudio.play().then(() => {
+      $("liveMusicToggleBtn").textContent = "⏸️ إيقاف الموسيقى";
+      if (liveMusicAudioTrack?.unmute) liveMusicAudioTrack.unmute();
+      else mixMusicIntoPeers();
+    }).catch(() => {});
+  } else {
+    liveMusicAudio.pause();
+    $("liveMusicToggleBtn").textContent = "▶️ تشغيل الموسيقى";
+    if (liveMusicAudioTrack?.mute) liveMusicAudioTrack.mute();
+  }
 });
 $("liveMusicVol").addEventListener("input", () => { if (liveMusicAudio) liveMusicAudio.volume = parseFloat($("liveMusicVol").value || "0.4"); });
 
-function mixMusicIntoPeers() {
-  if (!liveMusicAudio || !localMediaStream) return;
+async function mixMusicIntoPeers() {
+  if (!liveMusicAudio || !livekitRoom || !amISpeakerNow) return;
   try {
     if (!liveAudioCtx) liveAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (liveAudioCtx.state === "suspended") liveAudioCtx.resume();
+    if (liveAudioCtx.state === "suspended") await liveAudioCtx.resume();
     if (!liveMixedDest) liveMixedDest = liveAudioCtx.createMediaStreamDestination();
-    liveAudioCtx.createMediaStreamSource(localMediaStream).connect(liveMixedDest);
-    const ms = liveAudioCtx.createMediaElementSource(liveMusicAudio);
-    ms.connect(liveMixedDest); ms.connect(liveAudioCtx.destination);
+    if (!liveMusicAudio._srcNode) {
+      liveMusicAudio._srcNode = liveAudioCtx.createMediaElementSource(liveMusicAudio);
+      liveMusicAudio._srcNode.connect(liveMixedDest);
+      liveMusicAudio._srcNode.connect(liveAudioCtx.destination);
+    }
     const mt = liveMixedDest.stream.getAudioTracks()[0];
-    if (mt) Object.values(peerConnections).forEach(pc => { const s = pc.getSenders().find(x => x.track?.kind === "audio"); if (s) s.replaceTrack(mt).catch(() => {}); });
+    if (mt && !liveMusicAudioTrack) {
+      const pub = await livekitRoom.localParticipant.publishTrack(mt, { name: "live-music" });
+      liveMusicAudioTrack = pub?.track || mt;
+    }
   } catch {}
 }
 
@@ -1039,180 +1197,32 @@ $("liveExitBtn").addEventListener("click", async () => {
   leaveLiveRoom(false);
 });
 
-function closePeer(peerId) {
-  if (peerConnections[peerId]) { try { peerConnections[peerId].close(); } catch {} delete peerConnections[peerId]; }
-  delete pendingIceCandidates[peerId];
-  delete remoteMediaStreams[peerId];
-  const a = document.getElementById("aud_" + peerId); if (a) a.remove();
-}
-function closeAllPeers() {
-  Object.keys(peerConnections).forEach(closePeer);
-  peerConnections = {}; pendingIceCandidates = {}; remoteMediaStreams = {}; $("liveAudioPool").textContent = "";
-}
 function leaveLiveRoom(silent = false) {
-  closeAllPeers(); liveAudioUnlockBtn.hidden = true;
+  disconnectLiveKitOnly();
+  liveAudioUnlockBtn.hidden = true;
   if (liveMusicAudio) { liveMusicAudio.pause(); liveMusicAudio = null; }
   if (liveMixedDest) { liveMixedDest = null; }
-  if (localMediaStream) { localMediaStream.getTracks().forEach(t => t.stop()); localMediaStream = null; }
   if (liveRoomChannel) { db.removeChannel(liveRoomChannel); liveRoomChannel = null; }
   amISpeakerNow = false; activeLiveRoom = null; seatDecorMap = {}; mySeatDecorUrl = ""; $("dzLiveRoom").hidden = true;
   if (!silent) refreshAllData(false);
 }
 
-async function ensureLocalMediaIfNeeded(shouldSpeak) {
-  if (!shouldSpeak) {
-    if (localMediaStream) { localMediaStream.getTracks().forEach(t => t.stop()); localMediaStream = null; }
-    isCamEnabled = false;
-    return false;
-  }
-  if (localMediaStream && localMediaStream.getAudioTracks().length) {
-    localMediaStream.getAudioTracks().forEach(t => { t.enabled = !isMicMuted; });
-    return true;
-  }
-  const isHost = activeLiveRoom && activeLiveRoom.host_id === currentUser.id;
-  const wantVideo = isHost && parseRoomMeta(activeLiveRoom?.title || "").m === "video";
-  try {
-    localMediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      video: wantVideo ? { facingMode: { ideal: currentCamFacing } } : false
-    });
-  } catch {
-    try {
-      localMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      isCamEnabled = false;
-    } catch {
-      showToast("تأكد من منح إذن الميكروفون للمتصفح");
-      return false;
-    }
-  }
-  isMicMuted = false;
-  localMediaStream.getAudioTracks().forEach(t => { t.enabled = true; });
-  renderLiveSeatsAndControls();
-  return true;
-}
-
 async function syncSpeakerMediaAndPresence() {
-  if (!activeLiveRoom || !currentUser || !liveRoomChannel) return;
+  if (!activeLiveRoom || !currentUser || !liveRoomChannel || !livekitRoom) return;
   const isHost = activeLiveRoom.host_id === currentUser.id;
   const mySeat = liveSeatsCache.find(s => s.user_id === currentUser.id && s.status === "seated");
   const shouldSpeak = isHost || !!mySeat;
-  if (shouldSpeak !== amISpeakerNow) {
-    amISpeakerNow = shouldSpeak;
-    await ensureLocalMediaIfNeeded(shouldSpeak);
-    closeAllPeers();
-    myLiveSessionSeq++;
-    await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: shouldSpeak, sid: myLiveSessionSeq, decor: mySeatDecorUrl });
-  }
-}
-
-function getLocalAudioTrack() {
-  return liveMixedDest?.stream?.getAudioTracks()[0] || localMediaStream?.getAudioTracks()[0] || null;
-}
-
-function createPeerConnection(peerId, peerSid = 0, isOfferer = false) {
-  if (peerConnections[peerId]) return peerConnections[peerId];
-  const pc = new RTCPeerConnection({
-    iceCandidatePoolSize: 2,
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun.cloudflare.com:3478" },
-      { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-      { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
-      { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
-    ]
-  });
-  pc._sid = peerSid;
-  peerConnections[peerId] = pc;
-  pendingIceCandidates[peerId] = [];
-
-  if (isOfferer) {
-    const audioTrack = getLocalAudioTrack();
-    const videoTrack = localMediaStream?.getVideoTracks()[0] || null;
-    if (audioTrack) pc.addTrack(audioTrack, liveMixedDest?.stream || localMediaStream);
-    else pc.addTransceiver("audio", { direction: "recvonly" });
-
-    if (videoTrack) pc.addTrack(videoTrack, localMediaStream);
-    else pc.addTransceiver("video", { direction: "recvonly" });
-  }
-
-  pc.onicecandidate = ev => {
-    if (ev.candidate && liveRoomChannel) {
-      liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: peerId, from: currentUser.id, candidate: ev.candidate, sid: myLiveSessionSeq } });
-    }
-  };
-  pc.oniceconnectionstatechange = () => {
-    if (pc.iceConnectionState === "failed") { try { pc.restartIce(); } catch {} }
-    else if (pc.iceConnectionState === "disconnected") {
-      setTimeout(() => { if (peerConnections[peerId] === pc && pc.iceConnectionState === "disconnected") { try { pc.restartIce(); } catch {} } }, 3000);
-    }
-  };
-  pc.ontrack = ev => {
-    if (!remoteMediaStreams[peerId]) remoteMediaStreams[peerId] = new MediaStream();
-    const rs = remoteMediaStreams[peerId];
-    rs.getTracks().filter(t => t.kind === ev.track.kind).forEach(t => rs.removeTrack(t));
-    rs.addTrack(ev.track);
-
-    if (ev.track.kind === "video") {
-      ev.track.onended = () => renderLiveSeatsAndControls();
-      renderLiveSeatsAndControls();
-    }
-    if (ev.track.kind === "audio") {
-      let audio = document.getElementById("aud_" + peerId);
-      if (!audio) {
-        audio = document.createElement("audio");
-        audio.id = "aud_" + peerId;
-        audio.autoplay = true;
-        audio.playsInline = true;
-        audio.muted = false;
-        audio.volume = 1;
-        $("liveAudioPool").appendChild(audio);
+  if (shouldSpeak !== amISpeakerNow && !liveSpeakerSyncLock) {
+    liveSpeakerSyncLock = true;
+    try {
+      await connectLiveKitRoom(activeLiveRoom.id);
+      if (liveRoomChannel) {
+        await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, decor: mySeatDecorUrl });
       }
-      audio.srcObject = new MediaStream([ev.track]);
-      const p = audio.play();
-      if (p && p.catch) p.catch(() => { liveAudioUnlockBtn.hidden = false; });
-    }
-  };
-  return pc;
-}
-
-async function attachLocalTracksToAnswerer(pc) {
-  const audioTrack = getLocalAudioTrack();
-  const videoTrack = localMediaStream?.getVideoTracks()[0] || null;
-  const transceivers = pc.getTransceivers();
-
-  if (audioTrack) {
-    const at = transceivers.find(t => t.receiver?.track?.kind === "audio" || t.sender?.track?.kind === "audio");
-    if (at) {
-      await at.sender.replaceTrack(audioTrack);
-      at.direction = "sendrecv";
-    } else {
-      pc.addTrack(audioTrack, liveMixedDest?.stream || localMediaStream);
+    } finally {
+      liveSpeakerSyncLock = false;
     }
   }
-  if (videoTrack) {
-    const vt = transceivers.find(t => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video");
-    if (vt) {
-      await vt.sender.replaceTrack(videoTrack);
-      vt.direction = "sendrecv";
-    } else {
-      pc.addTrack(videoTrack, localMediaStream);
-    }
-  }
-}
-
-async function flushPendingIce(peerId, pc) {
-  const q = pendingIceCandidates[peerId] || [];
-  pendingIceCandidates[peerId] = [];
-  for (const c of q) { try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {} }
-}
-
-async function initiateOfferToPeer(peerId, peerSid = 0) {
-  const pc = createPeerConnection(peerId, peerSid, true);
-  if (pc.signalingState !== "stable") return;
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: peerId, from: currentUser.id, sdp: pc.localDescription, sid: myLiveSessionSeq } });
 }
 
 async function setupLiveRoomRealtime(roomId) {
@@ -1220,8 +1230,6 @@ async function setupLiveRoomRealtime(roomId) {
   const isHost = activeLiveRoom.host_id === currentUser.id;
   const mySeat = liveSeatsCache.find(s => s.user_id === currentUser.id && s.status === "seated");
   amISpeakerNow = isHost || !!mySeat;
-  myLiveSessionSeq++;
-  await ensureLocalMediaIfNeeded(amISpeakerNow);
 
   liveRoomChannel = db.channel("live-room-" + roomId, { config: { presence: { key: currentUser.id } } });
   liveRoomChannel
@@ -1253,10 +1261,7 @@ async function setupLiveRoomRealtime(roomId) {
         renderLiveSeatsAndControls();
       }
     })
-    .on("presence", { event: "leave" }, ({ leftPresences }) => {
-      (leftPresences || []).forEach(p => { if (p?.user_id && p.user_id !== currentUser.id) closePeer(p.user_id); });
-    })
-    .on("presence", { event: "sync" }, async () => {
+    .on("presence", { event: "sync" }, () => {
       const peers = Object.values(liveRoomChannel.presenceState()).flat();
       let decorChanged = false;
       for (const p of peers) {
@@ -1268,45 +1273,16 @@ async function setupLiveRoomRealtime(roomId) {
             decorChanged = true;
           }
         }
-        if (p.user_id === currentUser.id) continue;
-        const existing = peerConnections[p.user_id];
-        if (existing && p.sid !== undefined && existing._sid !== p.sid) closePeer(p.user_id);
-        if ((amISpeakerNow || p.is_speaker) && currentUser.id < p.user_id && !peerConnections[p.user_id]) {
-          await initiateOfferToPeer(p.user_id, p.sid || 0);
-        }
       }
       if (decorChanged) renderLiveSeatsAndControls();
     })
-    .on("broadcast", { event: "rtc-signal" }, async ({ payload }) => {
-      if (!payload || payload.to !== currentUser.id) return;
-      if (payload.sdp?.type === "offer" && payload.sid !== undefined && peerConnections[payload.from] && peerConnections[payload.from]._sid !== payload.sid) {
-        closePeer(payload.from);
-      }
-      const pc = createPeerConnection(payload.from, payload.sid || 0, false);
-      if (payload.sdp) {
-        const polite = currentUser.id > payload.from;
-        if (payload.sdp.type === "offer" && pc.signalingState !== "stable") {
-          if (!polite) return;
-          try { await pc.setLocalDescription({ type: "rollback" }); } catch {}
-        }
-        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-        await flushPendingIce(payload.from, pc);
-        if (payload.sdp.type === "offer") {
-          await attachLocalTracksToAnswerer(pc);
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          liveRoomChannel.send({ type: "broadcast", event: "rtc-signal", payload: { to: payload.from, from: currentUser.id, sdp: pc.localDescription, sid: myLiveSessionSeq } });
-        }
-      } else if (payload.candidate) {
-        if (pc.remoteDescription && pc.remoteDescription.type) { try { await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)); } catch {} }
-        else { pendingIceCandidates[payload.from] = pendingIceCandidates[payload.from] || []; pendingIceCandidates[payload.from].push(payload.candidate); }
-      }
-    })
     .subscribe(async status => {
       if (status === "SUBSCRIBED") {
-        await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, sid: myLiveSessionSeq, decor: mySeatDecorUrl });
+        await liveRoomChannel.track({ user_id: currentUser.id, is_speaker: amISpeakerNow, decor: mySeatDecorUrl });
       }
     });
+
+  await connectLiveKitRoom(roomId);
 }
 
 function buildFeedSlide(post) {
@@ -1633,7 +1609,6 @@ $("publishBtn").addEventListener("click", async () => {
   } catch (err) { alert("فشل النشر: " + err.message); }
   finally { btn.disabled = false; btn.textContent = "نشر الآن"; }
 });
-
 $("inboxOpenDiscoverBtn").addEventListener("click", openSearchModal);
 $("inboxSearchBtn").addEventListener("click", openSearchModal);
 $("inboxStatusToggle").addEventListener("click", async () => {
