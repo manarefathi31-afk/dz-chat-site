@@ -781,7 +781,7 @@ function renderLiveSeatsAndControls() {
 
 /* === محرك LiveKit للصوت والفيديو المباشر === */
 async function fetchLiveKitToken(roomId) {
-  const { data, error } = await db.functions.invoke("livekit-token", {
+  const { data, error } = await db.functions.invoke("bright-service", {
     body: { room_id: roomId }
   });
   if (error) {
