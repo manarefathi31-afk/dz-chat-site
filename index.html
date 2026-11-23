@@ -328,7 +328,7 @@
       </div>
     </div>
 
-    <!-- نافذة صغيرة للضغط المطول على الرسالة (تعديل / حذف / تفاعل) -->
+    <!-- نافذة صغيرة للضغط المطول على الرسالة -->
     <div id="dzMsgActionModal" class="dz-modal-overlay" dir="rtl" hidden>
       <div class="profile-edit-card msg-action-card">
         <div class="msg-react-bar" id="msgReactBar">
@@ -392,21 +392,34 @@
       </div>
     </div>
 
+    <!-- غرفة البث المباشر المطوّرة -->
     <div id="dzLiveRoom" dir="rtl" hidden>
-      <div class="live-topbar">
-        <div class="live-top-right-grp">
-          <button type="button" class="live-mini-icon-btn" id="liveSettingsBtn" title="خصائص الغرفة" hidden>⚙️</button>
-          <div class="live-host-pill">
+      <div class="live-topbar-pro">
+        <div class="live-top-row-1">
+          <div class="live-host-card-pro">
             <div class="live-host-avatar" id="liveHostAvatar">🇩🇿</div>
             <div class="live-host-meta">
-              <strong id="liveRoomTitle">بث مباشر لايف</strong>
-              <small id="liveHostName">المضيف: @host</small>
+              <strong id="liveHostName">المضيف</strong>
+              <small id="liveRoomTitle">بث مباشر</small>
             </div>
+            <button type="button" class="live-likes-pill" id="liveLikesBtn" title="إعجاب">
+              <span id="liveLikesCount">0</span> 🤍
+            </button>
+            <button type="button" class="live-join-pill" id="liveHostJoinBtn" hidden>انضمام 🧡</button>
+          </div>
+
+          <div class="live-top-left-grp">
+            <div class="live-top-supporters" id="liveTopSupporters"></div>
+            <div class="live-viewers-pill" id="liveViewersCount">1</div>
+            <button type="button" class="live-mini-icon-btn" id="liveSettingsBtn" title="خصائص الغرفة" hidden>⚙️</button>
+            <button type="button" class="live-exit-btn" id="liveExitBtn" title="خروج">✕</button>
           </div>
         </div>
-        <div class="live-top-actions">
-          <button type="button" class="live-req-toggle" id="liveReqToggleBtn" hidden>✋ (<span id="liveReqCount">0</span>)</button>
-          <button type="button" class="live-exit-btn" id="liveExitBtn">خروج</button>
+
+        <div class="live-top-row-2">
+          <span class="live-trending-badge">بث رائج 🧡</span>
+          <span class="live-goal-pill">🤝 <span id="liveGoalText">0/8</span></span>
+          <span class="live-fest-badge">🔥 LIVE DZ-CHAT</span>
         </div>
       </div>
 
@@ -415,24 +428,82 @@
         <div id="liveRequestsList"></div>
       </div>
 
-      <div class="live-host-stage" id="liveHostStage" hidden></div>
-      <div class="live-seats-grid" id="liveGuestSeats"></div>
-      <div class="live-comments-area" id="liveCommentsArea"></div>
+      <!-- 8 مقاعد يميناً + نافذة صاحب البث الكبيرة يساراً -->
+      <div class="live-stage-grid-wrap" id="liveStageGridWrap">
+        <div class="live-seats-grid" id="liveGuestSeats"></div>
+        <div class="live-host-stage" id="liveHostStage"></div>
+      </div>
 
-      <div class="live-bottom-bar">
-        <div class="live-bottom-row">
-          <button type="button" class="live-mini-share-btn" id="liveShareBtn" title="مشاركة مع الأصدقاء">➤</button>
+      <div class="live-comments-area" id="liveCommentsArea"></div>
+      <div class="live-action-controls" id="liveActionControls"></div>
+
+      <div class="live-bottom-bar live-bottom-bar-pro">
+        <div class="live-bottom-row-pro">
+          <button type="button" class="live-circle-btn guests-btn" id="liveGuestsBtn" title="الضيوف والطلبات">
+            👥<span class="live-req-dot" id="liveReqCountBadge" hidden>0</span>
+          </button>
+          <button type="button" class="live-circle-btn rose-btn" id="liveQuickRoseBtn" title="إرسال وردة (2 نقطة)">🌹</button>
+          <button type="button" class="live-circle-btn gift-btn" id="liveGiftsBtn" title="صندوق الهدايا">🎁</button>
+          <button type="button" class="live-circle-btn share-btn" id="liveShareBtn" title="مشاركة البث">
+            ↪<span class="live-share-num" id="liveShareCountBadge">0</span>
+          </button>
           <form class="live-comment-form" id="liveCommentForm">
-            <input id="liveCommentInput" type="text" placeholder="اكتب تعليقاً في البث..." required>
-            <button type="submit">إرسال</button>
+            <input id="liveCommentInput" type="text" placeholder="اكتب..." required autocomplete="off">
+            <button type="submit">➤</button>
           </form>
         </div>
-        <div class="live-action-controls" id="liveActionControls"></div>
       </div>
+
+      <!-- طبقة عرض الهدايا والفيديوهات فوق البث -->
+      <div class="live-gift-overlay" id="liveGiftOverlay" hidden>
+        <div class="gift-particles-layer" id="liveGiftParticles"></div>
+        <div class="gift-center-stage" id="liveGiftCenterStage">
+          <div class="gift-video-wrap" id="liveGiftVideoWrap" hidden>
+            <video id="liveGiftVideo" playsinline preload="auto"></video>
+          </div>
+          <div class="gift-image-showcase" id="liveGiftImageWrap" hidden>
+            <div class="gift-halo-ring ring-1"></div>
+            <div class="gift-halo-ring ring-2"></div>
+            <img id="liveGiftImg" alt="هدية" hidden>
+            <div class="gift-fallback-art" id="liveGiftFallbackArt">🌹</div>
+          </div>
+        </div>
+        <div class="gift-golden-banner" id="liveGiftBanner">
+          <div class="gift-banner-av-wrap">
+            <span class="gift-banner-crown">👑</span>
+            <div class="gift-banner-av" id="liveGiftSenderAv">🇩🇿</div>
+          </div>
+          <div class="gift-banner-text">
+            <strong id="liveGiftBannerTitle">مرسل أرسل لك هدية</strong>
+            <small id="liveGiftBannerSub">شكراً لك على هذه الهدية الجميلة ❤️</small>
+          </div>
+          <div class="gift-banner-ico" id="liveGiftBannerIco">🌹</div>
+        </div>
+      </div>
+
+      <button type="button" class="live-req-toggle" id="liveReqToggleBtn" hidden>✋ (<span id="liveReqCount">0</span>)</button>
       <div id="liveAudioPool" class="live-audio-pool"></div>
     </div>
 
-    <!-- نافذة خيارات المقعد (تظهر عند الضغط على المقعد) -->
+    <!-- نافذة صندوق الهدايا -->
+    <div id="dzLiveGiftsModal" class="dz-modal-overlay live-gifts-sheet-overlay" dir="rtl" hidden>
+      <div class="live-gifts-sheet">
+        <div class="gifts-sheet-head">
+          <strong>🎁 صندوق الهدايا</strong>
+          <small class="gifts-free-tag">إرسال مجاني حالياً ✨</small>
+          <button type="button" class="close-x" id="dzCloseLiveGifts">✕</button>
+        </div>
+        <div class="gifts-target-label">اختر المستلم:</div>
+        <div class="gifts-targets-row" id="liveGiftTargetsRow"></div>
+        <div class="gifts-grid" id="liveGiftsGrid"></div>
+        <div class="gifts-sheet-foot">
+          <div class="gifts-selected-info" id="liveGiftSelectedInfo">اختر هدية لإرسالها</div>
+          <button type="button" class="gifts-send-btn" id="liveGiftSendConfirmBtn">إرسال الهدية 🎁</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- نافذة خيارات المقعد -->
     <div id="dzSeatActionModal" class="dz-modal-overlay" dir="rtl" hidden>
       <div class="profile-edit-card seat-action-card">
         <div class="comments-header">
