@@ -260,7 +260,6 @@
       </form>
     </div>
 
-    <!-- صفحة إعدادات الخاص (النقاط الثلاث) -->
     <div id="dzChatSettingsModal" dir="rtl" hidden>
       <div class="cs-topbar">
         <button type="button" class="cs-icon-btn" id="csMoreDotBtn">•••</button>
@@ -328,7 +327,6 @@
       </div>
     </div>
 
-    <!-- نافذة صغيرة للضغط المطول على الرسالة -->
     <div id="dzMsgActionModal" class="dz-modal-overlay" dir="rtl" hidden>
       <div class="profile-edit-card msg-action-card">
         <div class="msg-react-bar" id="msgReactBar">
@@ -391,8 +389,7 @@
         <button type="button" id="dzCloseLiveSetup" class="modal-cancel-btn">إلغاء</button>
       </div>
     </div>
-
-    <!-- غرفة البث المباشر المطوّرة -->
+ <!-- غرفة البث المباشر المطوّرة -->
     <div id="dzLiveRoom" dir="rtl" hidden>
       <div class="live-topbar-pro">
         <div class="live-top-row-1">
@@ -410,7 +407,7 @@
 
           <div class="live-top-left-grp">
             <div class="live-top-supporters" id="liveTopSupporters"></div>
-            <div class="live-viewers-pill" id="liveViewersCount">1</div>
+            <button type="button" class="live-viewers-pill" id="liveViewersCount" title="عرض المشاهدين">1</button>
             <button type="button" class="live-mini-icon-btn" id="liveSettingsBtn" title="خصائص الغرفة" hidden>⚙️</button>
             <button type="button" class="live-exit-btn" id="liveExitBtn" title="خروج">✕</button>
           </div>
@@ -428,13 +425,18 @@
         <div id="liveRequestsList"></div>
       </div>
 
-      <!-- 8 مقاعد يميناً + نافذة صاحب البث الكبيرة يساراً -->
-      <div class="live-stage-grid-wrap" id="liveStageGridWrap">
-        <div class="live-seats-grid" id="liveGuestSeats"></div>
+      <!-- النصف الأعلى: المضيف والضيوف (ديناميكي بدون مربعات فارغة) -->
+      <div class="live-stage-grid-wrap" id="liveStageGridWrap" data-total="1">
+        <div class="live-seats-grid" id="liveGuestSeats" hidden></div>
         <div class="live-host-stage" id="liveHostStage"></div>
       </div>
 
-      <div class="live-comments-area" id="liveCommentsArea"></div>
+      <!-- النصف الأسفل: التعليقات فقط -->
+      <div class="live-comments-wrap">
+        <div class="live-comments-area" id="liveCommentsArea"></div>
+        <div class="live-comments-hidden-note" id="liveCommentsHiddenNote" hidden>🙈 التعليقات مخفية حالياً</div>
+      </div>
+
       <div class="live-action-controls" id="liveActionControls"></div>
 
       <div class="live-bottom-bar live-bottom-bar-pro">
@@ -454,7 +456,7 @@
         </div>
       </div>
 
-      <!-- طبقة عرض الهدايا والفيديوهات فوق البث -->
+      <!-- طبقة عرض الهدايا المؤقتة فوق البث -->
       <div class="live-gift-overlay" id="liveGiftOverlay" hidden>
         <div class="gift-particles-layer" id="liveGiftParticles"></div>
         <div class="gift-center-stage" id="liveGiftCenterStage">
@@ -485,21 +487,140 @@
       <div id="liveAudioPool" class="live-audio-pool"></div>
     </div>
 
-    <!-- نافذة صندوق الهدايا -->
+    <!-- 1) صندوق الهدايا الجديد (ستايل تيك توك بدون تصنيفات سفلية) -->
     <div id="dzLiveGiftsModal" class="dz-modal-overlay live-gifts-sheet-overlay" dir="rtl" hidden>
-      <div class="live-gifts-sheet">
-        <div class="gifts-sheet-head">
-          <strong>🎁 صندوق الهدايا</strong>
-          <small class="gifts-free-tag">إرسال مجاني حالياً ✨</small>
-          <button type="button" class="close-x" id="dzCloseLiveGifts">✕</button>
+      <div class="live-gifts-sheet-pro">
+        <div class="gifts-pro-top">
+          <button type="button" class="gifts-switch-pill" id="liveGiftSwitchBtn" title="تبديل المستلم">
+            <span class="switch-ico">⇄</span>
+            <span class="switch-av" id="liveGiftRecAv">🇩🇿</span>
+            <span class="switch-name" id="liveGiftRecName">المضيف</span>
+          </button>
+          <button type="button" class="gifts-close-btn" id="dzCloseLiveGifts">✕</button>
         </div>
-        <div class="gifts-target-label">اختر المستلم:</div>
-        <div class="gifts-targets-row" id="liveGiftTargetsRow"></div>
-        <div class="gifts-grid" id="liveGiftsGrid"></div>
-        <div class="gifts-sheet-foot">
-          <div class="gifts-selected-info" id="liveGiftSelectedInfo">اختر هدية لإرسالها</div>
-          <button type="button" class="gifts-send-btn" id="liveGiftSendConfirmBtn">إرسال الهدية 🎁</button>
+
+        <div class="gifts-targets-row" id="liveGiftTargetsRow" hidden></div>
+
+        <div class="gifts-supporter-bar">
+          <div class="gifts-sup-badge" id="liveGiftSenderLvl">1</div>
+          <div class="gifts-sup-track">
+            <div class="gifts-sup-fill" id="liveGiftProgressFill" style="width:20%"></div>
+          </div>
+          <span class="gifts-sup-txt" id="liveGiftSupText">أرسل هدية لدعم البث ✨</span>
         </div>
+
+        <div class="gifts-grid-pro" id="liveGiftsGrid"></div>
+      </div>
+    </div>
+
+    <!-- 2) نافذة قائمة المشاهدين في البث -->
+    <div id="dzLiveViewersModal" class="dz-modal-overlay live-gifts-sheet-overlay" dir="rtl" hidden>
+      <div class="live-light-sheet">
+        <div class="sheet-head-row">
+          <strong>المشاهدون في البث (<span id="liveViewersModalCount">1</span>)</strong>
+          <button type="button" class="close-x" id="dzCloseLiveViewers">✕</button>
+        </div>
+        <div class="live-viewers-list" id="liveViewersModalList"></div>
+      </div>
+    </div>
+
+    <!-- 3) نافذة المساهمون ونقاط الضيف (الشارة الزرقاء ★) -->
+    <div id="dzLiveContributorsModal" class="dz-modal-overlay live-gifts-sheet-overlay" dir="rtl" hidden>
+      <div class="live-light-sheet contrib-sheet">
+        <div class="contrib-head">
+          <button type="button" class="contrib-help-btn" id="contribHelpBtn" title="معلومات">؟</button>
+          <div class="contrib-title-wrap">
+            <strong id="contribGuestTitle">نقاط الضيف</strong>
+            <small id="contribGuestTotal">0</small>
+          </div>
+          <div class="contrib-av-wrap">
+            <div class="contrib-av" id="contribGuestAv">🇩🇿</div>
+            <span class="contrib-star-tag">★</span>
+          </div>
+        </div>
+
+        <div class="contrib-card">
+          <div class="contrib-card-cols">
+            <strong>المساهمون</strong>
+            <span>النقاط</span>
+          </div>
+          <div class="contrib-list" id="contribList"></div>
+        </div>
+
+        <div class="contrib-footer">
+          <button type="button" class="contrib-send-btn" id="contribSendGiftBtn">إرسال</button>
+          <div class="contrib-my-info">
+            <div class="contrib-my-txt">
+              <strong id="contribMyName">أنت</strong>
+              <small id="contribMyPts">0 ★ من النقاط</small>
+            </div>
+            <div class="contrib-my-av" id="contribMyAv">🇩🇿</div>
+            <span class="contrib-my-rank" id="contribMyRank">-</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4) بطاقة الملف المصغّر للمشاهد داخل البث + زر الحظر -->
+    <div id="dzLiveUserCardModal" class="dz-modal-overlay live-gifts-sheet-overlay" dir="rtl" hidden>
+      <div class="live-light-sheet live-ucard-sheet">
+        <div class="ucard-top-row">
+          <button type="button" class="ucard-ban-btn" id="liveCardModBtn" title="إدارة الحظر">🚫</button>
+          <div class="ucard-identity">
+            <div class="ucard-names">
+              <h3 id="liveCardName">عضو</h3>
+              <small id="liveCardHandle">@user</small>
+              <span class="ucard-rank-pill" id="liveCardBadge">عضو</span>
+            </div>
+            <div class="ucard-avatar" id="liveCardAv">🇩🇿</div>
+          </div>
+        </div>
+
+        <div class="ucard-stats" id="liveCardStats">0 من المتابعين • 0 يتابعهم</div>
+        <p class="ucard-bio" id="liveCardBio">لا توجد سيرة ذاتية</p>
+
+        <div class="ucard-cards-row">
+          <div class="ucard-mini-box">
+            <span class="ucard-mini-ico">💎</span>
+            <div><strong id="liveCardLevelTxt">النقاط: 0</strong><small>في هذا البث</small></div>
+          </div>
+          <div class="ucard-mini-box">
+            <span class="ucard-mini-ico">🤍</span>
+            <div><strong id="liveCardStatusTxt">مشاهد</strong><small>حالة العضو</small></div>
+          </div>
+        </div>
+
+        <div class="ucard-actions">
+          <button type="button" class="ucard-follow-btn" id="liveCardFollowBtn">＋ متابعة</button>
+          <button type="button" class="ucard-at-btn" id="liveCardMentionBtn" title="إشارة في التعليق">@</button>
+          <button type="button" class="ucard-at-btn" id="liveCardFullProfBtn" title="فتح الملف الشخصي">👤</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5) نافذة إدارة الحظر وقائمة المحظورين -->
+    <div id="dzLiveBanModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card">
+        <div class="comments-header">
+          <h2>إدارة الحظر في البث 🚫</h2>
+          <button type="button" class="close-x" id="dzCloseLiveBan">✕</button>
+        </div>
+        <div id="liveBanTargetBox" class="ban-target-box" hidden>
+          <p id="liveBanTargetMsg">حظر هذا المستخدم ومنعه من دخول البث نهائياً + إلغاء المتابعة؟</p>
+          <button type="button" id="liveBanConfirmBtn" class="choice-live-btn">🚫 تأكيد الحظر الفوري</button>
+        </div>
+        <label>قائمة المحظورين من هذا البث:</label>
+        <div id="liveBannedList" class="live-banned-list"></div>
+      </div>
+    </div>
+
+    <!-- 6) نافذة تأكيد إنهاء البث للمضيف -->
+    <div id="dzLiveExitConfirmModal" class="dz-modal-overlay" dir="rtl" hidden>
+      <div class="profile-edit-card seat-action-card">
+        <h2>إنهاء البث المباشر؟ 🔴</h2>
+        <p style="font-size:13px;color:#64748b;">سيتم إغلاق البث وخروج جميع المشاهدين والضيوف فوراً.</p>
+        <button type="button" id="liveExitConfirmBtn" class="choice-live-btn">نعم، إنهاء البث للجميع</button>
+        <button type="button" id="liveExitCancelBtn" class="modal-cancel-btn">إلغاء والبقاء</button>
       </div>
     </div>
 
@@ -514,8 +635,9 @@
       </div>
     </div>
 
+    <!-- 7) نافذة خصائص الغرفة (متناسقة + اللون الأسود + حذف وإخفاء التعليقات) -->
     <div id="dzLiveSettingsModal" class="dz-modal-overlay" dir="rtl" hidden>
-      <div class="profile-edit-card">
+      <div class="profile-edit-card live-settings-card-pro">
         <div class="comments-header">
           <h2>خصائص الغرفة ⚙️</h2>
           <button type="button" class="close-x" id="dzCloseLiveSettings">✕</button>
@@ -526,33 +648,49 @@
           <button type="button" class="bg-swatch" data-bg="emerald" style="background:linear-gradient(180deg,#064e3b,#041310)">زمردي</button>
           <button type="button" class="bg-swatch" data-bg="purple" style="background:linear-gradient(180deg,#4c1d95,#11081f)">بنفسجي</button>
           <button type="button" class="bg-swatch" data-bg="sunset" style="background:linear-gradient(180deg,#7c2d12,#1c0a09)">غروب</button>
+          <button type="button" class="bg-swatch" data-bg="black" style="background:#000000">أسود</button>
         </div>
-        <label class="upload-button" for="liveBgFile" style="text-align:center;margin:4px 0;">🖼️ اختيار خلفية من الصور</label>
+        <label class="settings-compact-btn upload-button" for="liveBgFile">🖼️ اختيار خلفية من الصور</label>
         <input type="file" id="liveBgFile" accept="image/*" hidden>
-        <label for="livePinInput">قفل الغرفة بمفتاح سري (4 أرقام - اتركه فارغاً للإلغاء)</label>
-        <input id="livePinInput" type="tel" maxlength="4" inputmode="numeric" placeholder="مثال: 1234">
-        <button type="button" id="liveSaveSettingsBtn">حفظ خصائص الغرفة ✅</button>
-        <hr style="border:0;border-top:1px solid #e5e7eb;margin:4px 0;">
+
+        <label for="livePinInput">قفل الغرفة بمفتاح سري (4 أرقام - فارغ للإلغاء)</label>
+        <div class="settings-pin-row">
+          <input id="livePinInput" type="tel" maxlength="4" inputmode="numeric" placeholder="مثال: 1234">
+          <button type="button" id="liveSaveSettingsBtn" class="settings-compact-btn">حفظ ✅</button>
+        </div>
+
+        <label>إدارة تعليقات البث 💬</label>
+        <div class="settings-two-btns">
+          <button type="button" id="liveToggleHideCommentsBtn" class="settings-compact-btn dark-btn">🙈 إخفاء التعليقات</button>
+          <button type="button" id="liveClearCommentsBtn" class="settings-compact-btn choice-live-btn">🗑️ حذف التعليقات</button>
+        </div>
+
         <label>موسيقى أثناء اللايف 🎵</label>
-        <label class="upload-button" for="liveMusicFile" style="text-align:center;margin:2px 0;">🎵 اختيار مقطع موسيقى</label>
+        <label class="settings-compact-btn upload-button" for="liveMusicFile">🎵 اختيار مقطع موسيقى</label>
         <input type="file" id="liveMusicFile" accept="audio/*" hidden>
-        <small id="liveMusicStatus" style="color:#07845b;font-size:12px;">لم يتم اختيار موسيقى</small>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <button type="button" id="liveMusicToggleBtn" style="flex:1;background:#0f172a;" disabled>▶️ تشغيل / إيقاف</button>
-          <input type="range" id="liveMusicVol" min="0" max="1" step="0.05" value="0.4" style="flex:1;">
+        <small id="liveMusicStatus" style="color:#07845b;font-size:11px;">لم يتم اختيار موسيقى</small>
+        <div class="settings-music-row">
+          <button type="button" id="liveMusicToggleBtn" class="settings-compact-btn dark-btn" disabled>▶️ تشغيل / إيقاف</button>
+          <input type="range" id="liveMusicVol" min="0" max="1" step="0.05" value="0.4">
         </div>
       </div>
     </div>
 
-    <div id="dzLiveShareModal" class="dz-modal-overlay" dir="rtl" hidden>
-      <div class="profile-edit-card">
-        <div class="comments-header">
-          <h2>مشاركة البث مع من تتابعهم ➤</h2>
-          <button type="button" class="close-x" id="dzCloseLiveShare">✕</button>
+    <!-- 8) نافذة المشاركة الاحترافية (مشاركة) -->
+    <div id="dzLiveShareModal" class="dz-modal-overlay live-gifts-sheet-overlay" dir="rtl" hidden>
+      <div class="live-light-sheet share-pro-sheet">
+        <div class="share-pro-head">
+          <button type="button" class="share-head-ico" id="dzCloseLiveShare">✕</button>
+          <strong>مشاركة</strong>
+          <button type="button" class="share-head-ico" id="liveShareSearchToggle">🔍</button>
         </div>
-        <p style="font-size:12px;color:#64748b;">اختر صديقاً لإرسال رابط دخول مباشر لبثك:</p>
+        <div id="liveShareSearchWrap" class="share-search-wrap" hidden>
+          <input id="liveShareSearchInput" type="text" placeholder="ابحث عن صديق للمشاركة...">
+        </div>
         <div class="live-share-friends-row" id="liveShareFriendsRow"></div>
-        <small id="liveShareStatus" style="color:#07845b;font-size:12px;text-align:center;"></small>
+        <div class="share-pro-row" id="liveShareExternalRow"></div>
+        <div class="share-pro-row secondary" id="liveShareQuickRow"></div>
+        <small id="liveShareStatus" style="color:#07845b;font-size:12px;text-align:center;display:block;min-height:16px;"></small>
       </div>
     </div>
 
@@ -674,4 +812,4 @@
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
     <script src="./script.js"></script>
   </body>
-</html>
+</html>   
