@@ -565,15 +565,36 @@ $("startLiveConfirmBtn").addEventListener("click", async () => {
   } catch (err) { alert("تعذر فتح البث:\n" + (err.message || err)); }
   finally { btn.disabled = false; btn.textContent = "بدء البث المباشر الآن"; }
 });
-/* === بيانات الهدايا السبع ونظام البث المباشر === */
+/* === بيانات الهدايا ونظام البث المباشر === */ 
 const LIVE_GIFTS = [
-  { id: "rose",    name: "وردة حمراء",  emoji: "🌹", points: 2,   type: "image", src: "./gifts/rose.png" },
-  { id: "heart",   name: "قلب ذهبي",    emoji: "💛", points: 10,  type: "image", src: "./gifts/heart.png" },
-  { id: "coffee",  name: "قهوة فاخرة",  emoji: "☕", points: 15,  type: "image", src: "./gifts/coffee.png" },
-  { id: "diamond", name: "ماسة زرقاء",  emoji: "💎", points: 20,  type: "image", src: "./gifts/diamond.png" },
-  { id: "crown",   name: "تاج ملكي",    emoji: "👑", points: 50,  type: "image", src: "./gifts/crown.png" },
-  { id: "lion",    name: "أسد ناري",    emoji: "🦁", points: 200, type: "video", src: "./gifts/lion.mp4", thumb: "./gifts/lion.png", dur: 5500 },
-  { id: "car",     name: "سيارة فاخرة", emoji: "🏎️", points: 500, type: "video", src: "./gifts/car.mp4",  thumb: "./gifts/car.png",  dur: 9500 }
+  { id: "rose",           name: "وردة حمراء",     emoji: "🌹", points: 2,    type: "image", src: "./gifts/rose.png" },
+  { id: "heart",          name: "قلب ذهبي",       emoji: "💛", points: 10,   type: "image", src: "./gifts/heart.png" },
+  { id: "coffee",         name: "قهوة فاخرة",     emoji: "☕", points: 15,   type: "image", src: "./gifts/coffee.png" },
+  { id: "diamond",        name: "ماسة زرقاء",     emoji: "💎", points: 20,   type: "image", src: "./gifts/diamond.png" },
+  { id: "bear",           name: "دب",             emoji: "🧸", points: 30,   type: "video", src: "./gifts/bear.mp4",           thumb: "./gifts/bear.png",           dur: 8500 },
+  { id: "crown",          name: "تاج ملكي",       emoji: "👑", points: 50,   type: "image", src: "./gifts/crown.png" },
+  { id: "sheep",          name: "الخروف",         emoji: "🐑", points: 50,   type: "video", src: "./gifts/sheep.mp4",          thumb: "./gifts/sheep.png",          dur: 8500 },
+  { id: "gold_box",       name: "صندوق ذهب",      emoji: "💰", points: 100,  type: "video", src: "./gifts/gold_box.mp4",       thumb: "./gifts/gold_box.png",       dur: 8500 },
+  { id: "skeleton",       name: "هيكل عظمي",      emoji: "💀", points: 150,  type: "video", src: "./gifts/skeleton.mp4",       thumb: "./gifts/skeleton.png",       dur: 8500 },
+  { id: "lion",           name: "أسد ناري",       emoji: "🦁", points: 200,  type: "video", src: "./gifts/lion.mp4",           thumb: "./gifts/lion.png",           dur: 5500 },
+  { id: "gold_ring",      name: "خاتم ذهبي",      emoji: "💍", points: 200,  type: "video", src: "./gifts/gold_ring.mp4",      thumb: "./gifts/gold_ring.png",      dur: 8500 },
+  { id: "birthday",       name: "هدية عيد ميلاد", emoji: "🎂", points: 200,  type: "video", src: "./gifts/birthday.mp4",       thumb: "./gifts/birthday.png",       dur: 8500 },
+  { id: "elephant",       name: "الفيل الهندي",   emoji: "🐘", points: 300,  type: "video", src: "./gifts/elephant.mp4",       thumb: "./gifts/elephant.png",       dur: 8500 },
+  { id: "car",            name: "سيارة فاخرة",    emoji: "🏎️", points: 500,  type: "video", src: "./gifts/car.mp4",            thumb: "./gifts/car.png",            dur: 9500 },
+  { id: "grey_wolf",      name: "ذئب رمادي",      emoji: "🐺", points: 600,  type: "video", src: "./gifts/grey_wolf.mp4",      thumb: "./gifts/grey_wolf.png",      dur: 8500 },
+  { id: "red_eagle",      name: "نسر أحمر ملكي",  emoji: "🦅", points: 700,  type: "video", src: "./gifts/red_eagle.mp4",      thumb: "./gifts/red_eagle.png",      dur: 8500 },
+  { id: "camel",          name: "الجمل",          emoji: "🐪", points: 850,  type: "video", src: "./gifts/camel.mp4",          thumb: "./gifts/camel.png",          dur: 8500 },
+  { id: "blue_tiger",     name: "النمر الأزرق",   emoji: "🐯", points: 1000, type: "video", src: "./gifts/blue_tiger.mp4",     thumb: "./gifts/blue_tiger.png",     dur: 8500 },
+  { id: "black_dragon",   name: "التنين الأسود",  emoji: "🐲", points: 1400, type: "video", src: "./gifts/black_dragon.mp4",   thumb: "./gifts/black_dragon.png",   dur: 8500 },
+  { id: "gold_lion",      name: "الأسد الذهبي",   emoji: "🦁", points: 1500, type: "video", src: "./gifts/gold_lion.mp4",      thumb: "./gifts/gold_lion.png",      dur: 8500 },
+  { id: "dark_coast",     name: "ساحل الظلام",    emoji: "🌑", points: 1500, type: "video", src: "./gifts/dark_coast.mp4",     thumb: "./gifts/dark_coast.png",     dur: 8500 },
+  { id: "princess",       name: "الأميرة البيضاء",emoji: "👸", points: 1700, type: "video", src: "./gifts/princess.mp4",       thumb: "./gifts/princess.png",       dur: 8500 },
+  { id: "white_dragon",   name: "التنين الأبيض",  emoji: "🐉", points: 1800, type: "video", src: "./gifts/white_dragon.mp4",   thumb: "./gifts/white_dragon.png",   dur: 8500 },
+  { id: "destroyer_lion", name: "الأسد المدمر",   emoji: "🔥", points: 1800, type: "video", src: "./gifts/destroyer_lion.mp4", thumb: "./gifts/destroyer_lion.png", dur: 8500 },
+  { id: "ship",           name: "الباخرة",        emoji: "🚢", points: 2000, type: "video", src: "./gifts/ship.mp4",           thumb: "./gifts/ship.png",           dur: 8500 },
+  { id: "king",           name: "الملك",          emoji: "🤴", points: 2000, type: "video", src: "./gifts/king.mp4",           thumb: "./gifts/king.png",           dur: 8500 },
+  { id: "plane",          name: "الطائرة",        emoji: "✈️", points: 3000, type: "video", src: "./gifts/plane.mp4",          thumb: "./gifts/plane.png",          dur: 8500 },
+  { id: "travel_plane",   name: "طائرة سفر",      emoji: "🛫", points: 5000, type: "video", src: "./gifts/travel_plane.mp4",   thumb: "./gifts/travel_plane.png",   dur: 8500 },
 ];
 
 let liveGiftPointsMap = {}, liveSupportersMap = {}, liveShareCount = 0, liveLikesCount = 0, liveViewersCount = 1;
@@ -587,7 +608,6 @@ function updateLivePointsBadges() {
     el.textContent = String(liveGiftPointsMap[uid] || 0);
   });
 }
-
 function renderTopSupporters() {
   const box = $("liveTopSupporters");
   if (!box) return;
