@@ -3116,3 +3116,126 @@ navItems.forEach(button => {
 
 app.style.display = "none"; showAuth();
 (async () => { const { data } = await db.auth.getSession(); if (data.session?.user) await loadUser(data.session.user); })();
+/* === ميزة التكبيس بالضغطتين (مثل تيك توك) === */
+(() => {
+  const wrap = document.querySelector("#dzLiveRoom .live-comments-wrap");
+  if (!wrap) return;
+
+  let layer = $("liveTakbeesLayer");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.id = "liveTakbeesLayer";
+    layer.className = "live-takbees-layer";
+    wrap.appendChild(layer);
+  }
+
+  const TAKBEES_ITEMS = ["❤️", "❤️", "❤️", "❤️", "❤️", "💖", "🔥", "✨", "🌹", "😍", "🇩🇿"];
+  let lastTapTs = 0, comboActive = false, resetTimer = null, sendTimer = null;
+  let lastSeenLikes = 0, localPending = 0;
+  let downX = 0, downY = 0, moved = false;
+
+  function formatTakbeesNum(n) {
+    n = Number(n) || 0;
+    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+    return String(n);
+  }
+
+  function spawnHeart(x, y, forceHeart = false) {
+    if (!layer || !activeLiveRoom) return;
+    while (layer.children.length >= 36) layer.removeChild(layer.firstChild);
+    const el = document.createElement("span");
+    el.className = "takbees-float";
+    el.textContent = forceHeart ? "❤️" : TAKBEES_ITEMS[Math.floor(Math.random() * TAKBEES_ITEMS.length)];
+    const rect = wrap.getBoundingClientRect();
+    const px = typeof x === "number" ? x : rect.width * (0.25 + Math.random() * 0.5);
+    const py = typeof y === "number" ? y : rect.height * (0.68 + Math.random() * 0.22);
+    const driftX = Math.round((Math.random() - 0.5) * 84);
+    const rot = Math.round((Math.random() - 0.5) * 44);
+    const dur = (0.95 + Math.random() * 0.4).toFixed(2) + "s";
+    el.style.left = px + "px";
+    el.style.top = py + "px";
+    el.style.setProperty("--drift-mid", Math.round(driftX * 0.35) + "px");
+    el.style.setProperty("--drift-x", driftX + "px");
+    el.style.setProperty("--rot", rot + "deg");
+    el.style.setProperty("--dur", dur);
+    el.style.setProperty("--rise-y", "-" + Math.max(90, Math.round(py + 30)) + "px");
+    layer.appendChild(el);
+    const rm = () => el.remove();
+    el.addEventListener("animationend", rm, { once: true });
+    setTimeout(rm, 1500);
+  }
+
+  function scheduleSyncLikes() {
+    if (sendTimer) return;
+    sendTimer = setTimeout(() => {
+      sendTimer = null;
+      if (activeLiveRoom && liveRoomChannel) {
+        liveRoomChannel.send({ type: "broadcast", event: "room-stats", payload: { likes: liveLikesCount, shares: liveShareCount } });
+      }
+    }, 220);
+  }
+
+  const origUpdateStats = updateLiveTopStatsUI;
+  updateLiveTopStatsUI = function () {
+    origUpdateStats();
+    if ($("liveLikesCount")) $("liveLikesCount").textContent = formatTakbeesNum(liveLikesCount);
+    const diff = (Number(liveLikesCount) || 0) - lastSeenLikes;
+    lastSeenLikes = Number(liveLikesCount) || 0;
+    if (diff > 0) {
+      const usedLocal = Math.min(diff, localPending);
+      localPending = Math.max(0, localPending - usedLocal);
+      const remoteCount = Math.min(6, diff - usedLocal);
+      for (let i = 0; i < remoteCount; i++) {
+        setTimeout(() => spawnHeart(null, null, i === 0), i * 65);
+      }
+    }
+  };
+
+  const origEnterLive = enterLiveRoom;
+  enterLiveRoom = async function (room) {
+    lastSeenLikes = 0; localPending = 0; comboActive = false; lastTapTs = 0;
+    if (layer) layer.textContent = "";
+    return await origEnterLive(room);
+  };
+
+  const origLeaveLive = leaveLiveRoom;
+  leaveLiveRoom = function (silent = false) {
+    clearTimeout(resetTimer); clearTimeout(sendTimer); sendTimer = null;
+    lastSeenLikes = 0; localPending = 0; comboActive = false; lastTapTs = 0;
+    if (layer) layer.textContent = "";
+    return origLeaveLive(silent);
+  };
+
+  wrap.addEventListener("pointerdown", e => {
+    if (!e.isPrimary) return;
+    downX = e.clientX; downY = e.clientY; moved = false;
+  }, { passive: true });
+
+  wrap.addEventListener("pointermove", e => {
+    if (!e.isPrimary || moved) return;
+    if (Math.hypot(e.clientX - downX, e.clientY - downY) > 12) moved = true;
+  }, { passive: true });
+
+  wrap.addEventListener("pointerup", e => {
+    if (!e.isPrimary || moved || !activeLiveRoom) return;
+    if (e.target.closest("button, input, textarea, a, .live-comment-av, .live-comment-pill strong, .live-action-controls")) return;
+    const now = Date.now();
+    if (!comboActive) {
+      if (now - lastTapTs <= 450) comboActive = true;
+      else { lastTapTs = now; return; }
+    }
+    clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => { comboActive = false; lastTapTs = 0; }, 950);
+
+    const rect = wrap.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    spawnHeart(x, y, true);
+    if (Math.random() < 0.45) spawnHeart(x + (Math.random() * 24 - 12), y, false);
+    liveLikesCount++;
+    localPending++;
+    updateLiveTopStatsUI();
+    scheduleSyncLikes();
+  });
+})();
