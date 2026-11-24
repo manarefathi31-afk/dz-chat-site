@@ -10,6 +10,50 @@ if (!window.supabase) {
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = id => document.getElementById(id);
 
+function safeUrl(url, allowDataMedia = false) {
+  if (!url || typeof url !== "string") return "";
+  const u = url.trim();
+  if (u.startsWith("./") || u.startsWith("/") || u.startsWith("blob:")) return u;
+  if (allowDataMedia && /^data:(image\/(png|jpeg|jpg|gif|webp)|audio\/(webm|mp4|ogg|mpeg|wav));base64,/i.test(u)) return u;
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") return parsed.href;
+  } catch {}
+  return "";
+}
+function safeCssBgUrl(url) {
+  const s = safeUrl(url, false);
+  return s ? s.replace(/["'()\\]/g, encodeURIComponent) : "";
+}
+function isSafeImageFile(file, maxMb = 5) {
+  if (!file) return false;
+  if (/svg/i.test(file.type || file.name || "")) { showToast("صيغة SVG غير مسموحة لأسباب أمنية"); return false; }
+  const extOk = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name || "");
+  const mimeOk = !file.type || /^image\/(jpeg|jpg|png|gif|webp)$/i.test(file.type);
+  if (!mimeOk || (!file.type && !extOk)) { showToast("يرجى اختيار صورة صالحة (JPG / PNG / WEBP)"); return false; }
+  if (file.size > maxMb * 1024 * 1024) { showToast(`حجم الصورة يجب أن يكون أقل من ${maxMb} ميغابايت`); return false; }
+  return true;
+}
+function isSafeVideoOrImageFile(file, maxMb = 50) {
+  if (!file) return null;
+  if (/svg/i.test(file.type || file.name || "")) { showToast("صيغة SVG غير مسموحة لأسباب أمنية"); return null; }
+  const isImg = /^image\/(jpeg|jpg|png|gif|webp)$/i.test(file.type) || /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name || "");
+  const isVid = /^video\/(mp4|quicktime|webm|x-matroska|3gpp)$/i.test(file.type) || file.type.startsWith("video/") || /\.(mp4|mov|webm|mkv|3gp)$/i.test(file.name || "");
+  if (!isImg && !isVid) { showToast("اختر صورة أو فيديو صالحاً"); return null; }
+  if (file.size > maxMb * 1024 * 1024) { showToast(`حجم الملف أكبر من ${maxMb} MB`); return null; }
+  return isImg ? "image" : "video";
+}
+function cleanText(str, maxLen = 500) {
+  return String(str || "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim().slice(0, maxLen);
+}
+const _rateMap = {};
+function checkRateLimit(key, ms = 450) {
+  const now = Date.now();
+  if (_rateMap[key] && now - _rateMap[key] < ms) return false;
+  _rateMap[key] = now;
+  return true;
+}
+
 let currentUser = null, currentProfile = null, profilesMap = {};
 let videosCache = [], likesCache = [], commentsCache = [], followsCache = [], liveRoomsCache = [], allMessagesCache = [];
 let onlineUserIds = new Set(), showOnlineStatus = true, presenceChannel = null, realtimeChannel = null;
@@ -45,7 +89,7 @@ if ("serviceWorker" in navigator) {
 }
 
 const seatPhotoInput = document.createElement("input");
-seatPhotoInput.type = "file"; seatPhotoInput.accept = "image/*"; seatPhotoInput.hidden = true;
+seatPhotoInput.type = "file"; seatPhotoInput.accept = "image/jpeg,image/png,image/webp,image/gif"; seatPhotoInput.hidden = true;
 document.body.appendChild(seatPhotoInput);
 
 const topNotifyEl = document.createElement("div");
@@ -145,10 +189,10 @@ function playLiveNotificationSound() {
     playTone(660, now, 0.12); playTone(880, now + 0.12, 0.12); playTone(1320, now + 0.24, 0.24);
   } catch {}
 }
-
 async function sendSystemNotification(title, body, icon, data = {}, tag = "dz-notify") {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
-  const opts = { body, icon: icon || undefined, badge: icon || undefined, data, tag, renotify: true, vibrate: [180, 80, 180] };
+  const safeIcon = safeUrl(icon, false) || undefined;
+  const opts = { body, icon: safeIcon, badge: safeIcon, data, tag, renotify: true, vibrate: [180, 80, 180] };
   try {
     const reg = swReg || (navigator.serviceWorker ? await navigator.serviceWorker.getRegistration("./") : null);
     if (reg && reg.showNotification) { await reg.showNotification(title, opts); return; }
@@ -280,7 +324,8 @@ function authMessage(msg, error = false) {
 function setAvatarContent(el, url, alt = "صورة") {
   if (!el) return;
   el.textContent = "";
-  if (url) { const img = document.createElement("img"); img.src = url; img.alt = alt; el.appendChild(img); }
+  const safe = safeUrl(url, true);
+  if (safe) { const img = document.createElement("img"); img.src = safe; img.alt = alt; el.appendChild(img); }
   else el.textContent = "🇩🇿";
 }
 function blobToDataUrl(blob) {
@@ -338,7 +383,7 @@ function toggleSavedPostId(postId) {
   return saved;
 }
 function getUserThought() { return currentUser ? (localStorage.getItem("dz_thought_" + currentUser.id) || "") : ""; }
-function setUserThought(txt) { if (currentUser) localStorage.setItem("dz_thought_" + currentUser.id, txt.trim()); }
+function setUserThought(txt) { if (currentUser) localStorage.setItem("dz_thought_" + currentUser.id, cleanText(txt, 100)); }
 
 function parseRoomMeta(raw) {
   const fb = { t: raw || "غرفة لايف 🇩🇿", m: "audio", b: "default", p: "", s: "", bl: [], hc: false };
@@ -353,7 +398,7 @@ function parseRoomMeta(raw) {
 }
 function packRoomMeta(m) {
   return JSON.stringify({
-    t: m.t || "غرفة لايف 🇩🇿", m: m.m || "audio", b: m.b || "default",
+    t: cleanText(m.t, 80) || "غرفة لايف 🇩🇿", m: m.m || "audio", b: m.b || "default",
     p: m.p || "", s: m.s || "", bl: Array.isArray(m.bl) ? m.bl : [], hc: !!m.hc
   });
 }
@@ -371,6 +416,7 @@ function parseMsgPayload(content) {
   }
   return { kind: "text", text: content, react: "", edited: false };
 }
+
 const authScreen = document.createElement("div");
 authScreen.id = "dzAuth";
 authScreen.innerHTML = `<div class="auth-card"><div class="auth-flag">🇩🇿</div><h2>DZ-CHAT</h2><p class="auth-sub">سجّل باسم المستخدم وكلمة المرور فقط بدون تعقيدات</p><form id="dzLoginForm"><input id="dzEmail" type="text" placeholder="اسم المستخدم" required minlength="3" autocomplete="username"><input id="dzPassword" type="password" placeholder="كلمة المرور" required minlength="6" autocomplete="current-password"><button class="auth-main" type="submit">تسجيل الدخول</button></form><form id="dzRegisterForm" hidden><input id="dzName" type="text" placeholder="اسم المستخدم" required minlength="3" autocomplete="username"><input id="dzNewPassword" type="password" placeholder="كلمة المرور (6 أحرف على الأقل)" required minlength="6" autocomplete="new-password"><button class="auth-main" type="submit">إنشاء حساب جديد</button></form><button type="button" class="auth-switch" id="dzSwitch">ليس لديك حساب؟ أنشئ حساباً جديداً</button><div class="auth-message" id="dzAuthMessage"></div></div>`;
@@ -408,7 +454,7 @@ async function ensureProfile(user) {
   const { data, error } = await db.from("profiles").select("*").eq("id", user.id).maybeSingle();
   if (error) throw error;
   if (data) return data;
-  const username = (user.user_metadata?.username || user.user_metadata?.display_name || user.email.split("@")[0]).replace(/^@/, "");
+  const username = cleanText((user.user_metadata?.username || user.user_metadata?.display_name || user.email.split("@")[0]).replace(/^@/, ""), 30);
   const { data: ins, error: iErr } = await db.from("profiles").upsert({ id: user.id, username, bio: "عضو في مجتمع DZ-CHAT", country: "الجزائر", avatar_url: null }, { onConflict: "id" }).select().single();
   if (iErr) throw iErr;
   return ins;
@@ -416,6 +462,7 @@ async function ensureProfile(user) {
 
 $("dzLoginForm").addEventListener("submit", async e => {
   e.preventDefault();
+  if (!checkRateLimit("auth", 1200)) return;
   const btn = e.submitter, raw = $("dzEmail").value.trim(), password = $("dzPassword").value;
   if (raw.replace(/^@+/, "").length < 3) { authMessage("اسم المستخدم يجب أن يكون 3 أحرف على الأقل", true); return; }
   btn.disabled = true; btn.textContent = "جارٍ الدخول...";
@@ -430,7 +477,8 @@ $("dzLoginForm").addEventListener("submit", async e => {
 
 $("dzRegisterForm").addEventListener("submit", async e => {
   e.preventDefault();
-  const username = $("dzName").value.trim().replace(/^@+/, ""), password = $("dzNewPassword").value, btn = e.submitter;
+  if (!checkRateLimit("auth", 1200)) return;
+  const username = cleanText($("dzName").value.replace(/^@+/, ""), 30), password = $("dzNewPassword").value, btn = e.submitter;
   if (username.length < 3) { authMessage("اسم المستخدم يجب أن يكون 3 أحرف على الأقل", true); return; }
   btn.disabled = true; btn.textContent = "جارٍ الإنشاء...";
   try {
@@ -442,7 +490,6 @@ $("dzRegisterForm").addEventListener("submit", async e => {
     authMessage((err.message || "").includes("User already registered") ? "اسم المستخدم مستخدم بالفعل." : "تعذر إنشاء الحساب: " + err.message, true);
   } finally { btn.disabled = false; btn.textContent = "إنشاء حساب جديد"; }
 });
-
 async function refreshAllData(redrawFeed = true) {
   const [pRes, vRes, lRes, cRes, fRes, rRes, mRes] = await Promise.all([
     db.from("profiles").select("*"),
@@ -546,7 +593,8 @@ function applyLiveRoomBackground(bg) {
     sunset: "radial-gradient(circle at 50% 15%, #c2410c 0%, transparent 60%), linear-gradient(180deg, #431407 0%, #110605 100%)",
     black: "linear-gradient(180deg, #000000 0%, #050505 100%)"
   };
-  el.style.backgroundImage = (bg && bg.startsWith("http")) ? `linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.75)), url("${bg}")` : (map[bg] || map.default);
+  const safeBg = (bg && bg.startsWith("http")) ? safeCssBgUrl(bg) : "";
+  el.style.backgroundImage = safeBg ? `linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.75)), url("${safeBg}")` : (map[bg] || map.default);
 }
 
 function tryEnterLiveRoom(room) {
@@ -582,9 +630,9 @@ $("liveModeVideo").addEventListener("click", () => { selectedLiveMode = "video";
 $("liveModeAudio").addEventListener("click", () => { selectedLiveMode = "audio"; $("liveModeAudio").classList.add("active"); $("liveModeVideo").classList.remove("active"); });
 
 $("startLiveConfirmBtn").addEventListener("click", async () => {
-  if (!currentUser) return;
+  if (!currentUser || !checkRateLimit("startLive", 1500)) return;
   unlockNotifyAudio();
-  const btn = $("startLiveConfirmBtn"), titleText = $("liveTitleInput").value.trim() || "غرفة لايف 🇩🇿";
+  const btn = $("startLiveConfirmBtn"), titleText = cleanText($("liveTitleInput").value, 80) || "غرفة لايف 🇩🇿";
   const packed = packRoomMeta({ t: titleText, m: selectedLiveMode, b: "default", p: "", s: "", bl: [], hc: false });
   btn.disabled = true; btn.textContent = "جارٍ فتح البث...";
   try {
@@ -598,7 +646,7 @@ $("startLiveConfirmBtn").addEventListener("click", async () => {
   } catch (err) { alert("تعذر فتح البث:\n" + (err.message || err)); }
   finally { btn.disabled = false; btn.textContent = "بدء البث المباشر الآن"; }
 });
-/* === بيانات الهدايا الـ 28 ونظام البث المباشر === */
+
 const LIVE_GIFTS = [
   { id: "rose",           name: "وردة حمراء",     emoji: "🌹", points: 2,    type: "image", src: "./gifts/rose.png" },
   { id: "heart",          name: "قلب ذهبي",       emoji: "💛", points: 10,   type: "image", src: "./gifts/heart.png" },
@@ -629,7 +677,6 @@ const LIVE_GIFTS = [
   { id: "plane",          name: "الطائرة",        emoji: "✈️", points: 3000, type: "video", src: "./gifts/plane.mp4",          thumb: "./gifts/plane.png",          dur: 8500 },
   { id: "travel_plane",   name: "طائرة سفر",      emoji: "🛫", points: 5000, type: "video", src: "./gifts/travel_plane.mp4",   thumb: "./gifts/travel_plane.png",   dur: 8500 }
 ];
-
 let liveGiftPointsMap = {}, liveSupportersMap = {}, liveRecipientDonorsMap = {};
 let liveViewerIds = [], liveShareCount = 0, liveLikesCount = 0, liveViewersCount = 1;
 let liveGiftQueue = [], isPlayingGiftAnim = false, giftAnimTimeout = null;
@@ -639,7 +686,7 @@ function updateLivePointsBadges() {
   if (!activeLiveRoom) return;
   document.querySelectorAll("[data-points-uid]").forEach(el => {
     const uid = el.dataset.pointsUid;
-    el.textContent = String(liveGiftPointsMap[uid] || 0);
+    el.textContent = String(Number(liveGiftPointsMap[uid]) || 0);
   });
 }
 
@@ -741,7 +788,6 @@ function getStreamForUser(uid) {
   return remoteMediaStreams[uid] || null;
 }
 
-/* === النافذة الكبيرة تعرض دائماً صاحب البث === */
 function renderSpotlightStage() {
   const stage = $("liveHostStage");
   if (!activeLiveRoom || !currentUser) { stage.hidden = true; stage.textContent = ""; return; }
@@ -750,7 +796,7 @@ function renderSpotlightStage() {
   const p = profilesMap[hostId] || {};
   const stream = getStreamForUser(hostId);
   const hasVid = stream && stream.getVideoTracks().some(t => t.readyState === "live") && (!isMe || isCamEnabled);
-  const decor = seatDecorMap[hostId];
+  const decor = safeUrl(seatDecorMap[hostId], false);
 
   stage.hidden = false; stage.textContent = "";
   const card = document.createElement("div"); card.className = "spotlight-card";
@@ -765,7 +811,9 @@ function renderSpotlightStage() {
   }
 
   const pts = document.createElement("button"); pts.type = "button"; pts.className = "seat-points-badge";
-  pts.innerHTML = `<span data-points-uid="${hostId}">${liveGiftPointsMap[hostId] || 0}</span><span class="star-ico">★</span>`;
+  const pNum = document.createElement("span"); pNum.dataset.pointsUid = hostId; pNum.textContent = String(Number(liveGiftPointsMap[hostId]) || 0);
+  const pStar = document.createElement("span"); pStar.className = "star-ico"; pStar.textContent = "★";
+  pts.append(pNum, pStar);
   pts.onclick = e => { e.stopPropagation(); openGuestContributorsModal(hostId); };
   card.appendChild(pts);
 
@@ -861,14 +909,16 @@ function renderLiveSeatsAndControls() {
     const userId = guest.user_id, prof = profilesMap[userId] || {}, isMe = userId === currentUser.id;
     const seatEl = document.createElement("div");
     seatEl.className = "guest-seat occupied";
-    const decor = seatDecorMap[userId];
+    const decor = safeUrl(seatDecorMap[userId], false);
     if (decor) {
       seatEl.classList.add("has-decor");
       const dImg = document.createElement("img"); dImg.className = "seat-decor-img"; dImg.src = decor; seatEl.appendChild(dImg);
     }
 
     const pts = document.createElement("button"); pts.type = "button"; pts.className = "seat-points-badge";
-    pts.innerHTML = `<span data-points-uid="${userId}">${liveGiftPointsMap[userId] || 0}</span><span class="star-ico">★</span>`;
+    const pNum = document.createElement("span"); pNum.dataset.pointsUid = userId; pNum.textContent = String(Number(liveGiftPointsMap[userId]) || 0);
+    const pStar = document.createElement("span"); pStar.className = "star-ico"; pStar.textContent = "★";
+    pts.append(pNum, pStar);
     pts.onclick = e => { e.stopPropagation(); openGuestContributorsModal(userId); };
     seatEl.appendChild(pts);
 
@@ -902,7 +952,6 @@ function renderLiveSeatsAndControls() {
     const b = document.createElement("button"); b.type = "button"; b.className = "live-ctrl-btn warn"; b.textContent = "⏳ إلغاء طلب الصعود"; b.onclick = () => removeSeatRow(currentUser.id); ctrl.appendChild(b);
   }
 }
-/* === صندوق الهدايا الجديد (ستايل تيك توك) === */
 function refreshGiftSwitchHeader() {
   if (!activeLiveRoom) return;
   const hostId = activeLiveRoom.host_id;
@@ -958,7 +1007,7 @@ function renderGiftGridTiles() {
       const vt = document.createElement("span"); vt.className = "gift-tile-vid-tag"; vt.textContent = "🎬"; tile.appendChild(vt);
     }
     const media = document.createElement("div"); media.className = "gift-tile-media";
-    const imgSrc = g.thumb || g.src;
+    const imgSrc = safeUrl(g.thumb || g.src, false);
     if (imgSrc && imgSrc.endsWith(".png")) {
       const img = document.createElement("img"); img.src = imgSrc; img.alt = g.name;
       img.onerror = () => { img.remove(); media.textContent = g.emoji; };
@@ -994,7 +1043,7 @@ $("dzCloseLiveGifts").addEventListener("click", () => { $("dzLiveGiftsModal").hi
 $("dzLiveGiftsModal").addEventListener("click", e => { if (e.target === $("dzLiveGiftsModal")) $("dzLiveGiftsModal").hidden = true; });
 
 async function sendLiveGift(giftId, targetUserId) {
-  if (!activeLiveRoom || !currentUser) return;
+  if (!activeLiveRoom || !currentUser || !checkRateLimit("gift", 350)) return;
   const gift = LIVE_GIFTS.find(g => g.id === giftId); if (!gift) return;
   const hostId = activeLiveRoom.host_id;
   const validIds = new Set([hostId, ...liveSeatsCache.filter(s => s.status === "seated").map(s => s.user_id)]);
@@ -1010,18 +1059,12 @@ async function sendLiveGift(giftId, targetUserId) {
   renderTopSupporters();
 
   const payload = {
-    giftId: gift.id,
-    giftName: gift.name,
-    giftEmoji: gift.emoji,
-    points: gift.points,
-    totalPoints: newTotal,
-    senderTotal: liveSupportersMap[currentUser.id],
+    giftId: gift.id, giftName: gift.name, giftEmoji: gift.emoji, points: gift.points,
+    totalPoints: newTotal, senderTotal: liveSupportersMap[currentUser.id],
     senderToRecTotal: liveRecipientDonorsMap[recId][currentUser.id],
-    senderId: currentUser.id,
-    senderName: currentProfile?.username || "عضو",
+    senderId: currentUser.id, senderName: currentProfile?.username || "عضو",
     senderAvatar: currentProfile?.avatar_url || "",
-    recipientId: recId,
-    recipientName: profilesMap[recId]?.username || "المضيف"
+    recipientId: recId, recipientName: profilesMap[recId]?.username || "المضيف"
   };
 
   if (liveRoomChannel) {
@@ -1065,8 +1108,8 @@ function playNextGiftInQueue() {
   const gift = LIVE_GIFTS.find(g => g.id === p.giftId) || LIVE_GIFTS[0];
 
   setAvatarContent($("liveGiftSenderAv"), p.senderAvatar, p.senderName);
-  $("liveGiftBannerTitle").textContent = `${p.senderName} أرسل لك ${gift.name}`;
-  $("liveGiftBannerSub").textContent = `+${gift.points} نقطة إلى @${p.recipientName} • شكراً على الهدية ❤️`;
+  $("liveGiftBannerTitle").textContent = `${p.senderName || "عضو"} أرسل لك ${gift.name}`;
+  $("liveGiftBannerSub").textContent = `+${gift.points} نقطة إلى @${p.recipientName || "المضيف"} • شكراً على الهدية ❤️`;
   $("liveGiftBannerIco").textContent = gift.emoji;
   spawnGiftParticles(gift.emoji);
 
@@ -1083,8 +1126,8 @@ function playNextGiftInQueue() {
   const showImageMode = (durationMs = 3600) => {
     vWrap.hidden = true; iWrap.hidden = false;
     fb.textContent = gift.emoji; fb.hidden = false; img.hidden = true;
-    const imgSrc = gift.thumb || gift.src;
-    if (gift.type === "image" || imgSrc.endsWith(".png")) {
+    const imgSrc = safeUrl(gift.thumb || gift.src, false);
+    if ((gift.type === "image" || imgSrc.endsWith(".png")) && imgSrc) {
       img.onload = () => { img.hidden = false; fb.hidden = true; };
       img.onerror = () => { img.hidden = true; fb.hidden = false; };
       img.src = imgSrc;
@@ -1092,9 +1135,10 @@ function playNextGiftInQueue() {
     giftAnimTimeout = setTimeout(finishStep, durationMs);
   };
 
-  if (gift.type === "video") {
+  const vidSrc = safeUrl(gift.src, false);
+  if (gift.type === "video" && vidSrc) {
     iWrap.hidden = true; vWrap.hidden = false;
-    vid.muted = false; vid.src = gift.src; vid.currentTime = 0;
+    vid.muted = false; vid.src = vidSrc; vid.currentTime = 0;
     vid.onended = finishStep;
     vid.onerror = () => { showImageMode(3800); };
     vid.play().catch(() => {
@@ -1107,7 +1151,6 @@ function playNextGiftInQueue() {
   }
 }
 
-/* === قائمة المشاهدين في الأعلى === */
 function openLiveViewersModal() {
   if (!activeLiveRoom) return;
   const hostId = activeLiveRoom.host_id;
@@ -1144,13 +1187,12 @@ $("liveTopSupporters").addEventListener("click", openLiveViewersModal);
 $("dzCloseLiveViewers").addEventListener("click", () => { $("dzLiveViewersModal").hidden = true; });
 $("dzLiveViewersModal").addEventListener("click", e => { if (e.target === $("dzLiveViewersModal")) $("dzLiveViewersModal").hidden = true; });
 
-/* === نافذة المساهمون ونقاط الضيف (الشارة الزرقاء ★) === */
 function openGuestContributorsModal(guestId) {
   if (!activeLiveRoom || !guestId) return;
   activeContribGuestId = guestId;
   const gp = profilesMap[guestId] || {};
   $("contribGuestTitle").textContent = "نقاط " + (gp.username || "الضيف");
-  $("contribGuestTotal").textContent = String(liveGiftPointsMap[guestId] || 0);
+  $("contribGuestTotal").textContent = String(Number(liveGiftPointsMap[guestId]) || 0);
   setAvatarContent($("contribGuestAv"), gp.avatar_url, gp.username);
 
   const donors = liveRecipientDonorsMap[guestId] || {};
@@ -1190,404 +1232,6 @@ $("contribSendGiftBtn").addEventListener("click", () => {
 });
 $("dzLiveContributorsModal").addEventListener("click", e => { if (e.target === $("dzLiveContributorsModal")) $("dzLiveContributorsModal").hidden = true; });
 
-/* === بطاقة الملف المصغر داخل البث + نظام الحظر الفوري === */
-function openLiveUserCard(uid) {
-  if (!activeLiveRoom || !currentUser || !uid) return;
-  activeLiveCardUserId = uid;
-  const u = profilesMap[uid] || { id: uid, username: "عضو" };
-  const isMe = uid === currentUser.id, isHost = activeLiveRoom.host_id === currentUser.id;
-  const isTargetHost = uid === activeLiveRoom.host_id;
-  const isSeated = liveSeatsCache.some(s => s.user_id === uid && s.status === "seated");
-
-  $("liveCardName").textContent = u.username || "عضو";
-  $("liveCardHandle").textContent = "@" + (u.username || "user");
-  $("liveCardBadge").textContent = isTargetHost ? "👑 المضيف" : (isSeated ? "🎙️ ضيف" : "مشاهد");
-  setAvatarContent($("liveCardAv"), u.avatar_url, u.username);
-
-  const followers = followsCache.filter(f => f.following_id === uid).length;
-  const following = followsCache.filter(f => f.follower_id === uid).length;
-  $("liveCardStats").textContent = `${formatCount(followers)} من المتابعين • ${formatCount(following)} يتابعهم`;
-  $("liveCardBio").textContent = u.bio || "لا توجد سيرة ذاتية";
-  $("liveCardLevelTxt").textContent = `النقاط: ${liveSupportersMap[uid] || 0}`;
-  $("liveCardStatusTxt").textContent = isTargetHost ? "صاحب البث" : (isSeated ? "على المقعد" : "مشاهد");
-
-  $("liveCardModBtn").hidden = !isHost;
-  $("liveCardFollowBtn").hidden = isMe;
-  const iFollow = followsCache.some(f => f.follower_id === currentUser.id && f.following_id === uid);
-  $("liveCardFollowBtn").classList.toggle("following", iFollow);
-  $("liveCardFollowBtn").textContent = iFollow ? "✓ تتابعه" : "＋ متابعة";
-  $("dzLiveUserCardModal").hidden = false;
-}
-$("dzLiveUserCardModal").addEventListener("click", e => { if (e.target === $("dzLiveUserCardModal")) $("dzLiveUserCardModal").hidden = true; });
-$("liveCardFollowBtn").addEventListener("click", async () => {
-  if (!activeLiveCardUserId) return;
-  await toggleFollow(activeLiveCardUserId);
-  openLiveUserCard(activeLiveCardUserId);
-  updateLiveTopStatsUI();
-});
-$("liveCardMentionBtn").addEventListener("click", () => {
-  if (!activeLiveCardUserId) return;
-  const un = profilesMap[activeLiveCardUserId]?.username || "user";
-  $("dzLiveUserCardModal").hidden = true;
-  $("liveCommentInput").value = `@${un} ` + $("liveCommentInput").value;
-  $("liveCommentInput").focus();
-});
-$("liveCardFullProfBtn").addEventListener("click", () => {
-  const id = activeLiveCardUserId;
-  $("dzLiveUserCardModal").hidden = true;
-  if (id) openUserProfile(id);
-});
-
-function openLiveBanModal(targetUid = null) {
-  if (!activeLiveRoom || activeLiveRoom.host_id !== currentUser?.id) return;
-  const showTarget = targetUid && targetUid !== currentUser.id;
-  $("liveBanTargetBox").hidden = !showTarget;
-  if (showTarget) {
-    const tu = profilesMap[targetUid] || {};
-    $("liveBanTargetMsg").textContent = `حظر @${tu.username || "هذا المستخدم"} يمنعه نهائياً من دخول هذا البث ويلغي المتابعة فوراً.`;
-    $("liveBanConfirmBtn").onclick = () => banUserFromLive(targetUid);
-  }
-  const meta = parseRoomMeta(activeLiveRoom.title);
-  const bl = meta.bl || [];
-  const list = $("liveBannedList"); list.textContent = "";
-  if (!bl.length) {
-    list.innerHTML = `<p style="text-align:center;color:#94a3b8;font-size:12px;padding:12px 0;">لا يوجد محظورون في هذا البث.</p>`;
-  } else {
-    bl.forEach(bUid => {
-      const bp = profilesMap[bUid] || {};
-      const row = document.createElement("div"); row.className = "banned-row";
-      const sp = document.createElement("span"); sp.textContent = "@" + (bp.username || "مستخدم"); sp.style.fontSize = "13px"; sp.style.fontWeight = "700";
-      const ub = document.createElement("button"); ub.type = "button"; ub.textContent = "إزالة الحظر";
-      ub.onclick = () => unbanUserFromLive(bUid);
-      row.append(sp, ub); list.appendChild(row);
-    });
-  }
-  $("dzLiveBanModal").hidden = false;
-}
-$("liveCardModBtn").addEventListener("click", () => {
-  const tid = activeLiveCardUserId;
-  $("dzLiveUserCardModal").hidden = true;
-  openLiveBanModal(tid);
-});
-$("dzCloseLiveBan").addEventListener("click", () => { $("dzLiveBanModal").hidden = true; });
-$("dzLiveBanModal").addEventListener("click", e => { if (e.target === $("dzLiveBanModal")) $("dzLiveBanModal").hidden = true; });
-
-async function banUserFromLive(targetUid) {
-  if (!activeLiveRoom || !currentUser || activeLiveRoom.host_id !== currentUser.id || targetUid === currentUser.id) return;
-  const meta = parseRoomMeta(activeLiveRoom.title);
-  const nextBl = [...new Set([...(meta.bl || []), targetUid])];
-  await updateLiveRoomMeta({ bl: nextBl });
-  await db.from("live_seats").delete().match({ room_id: activeLiveRoom.id, user_id: targetUid });
-  await db.from("follows").delete().match({ follower_id: currentUser.id, following_id: targetUid });
-  await db.from("follows").delete().match({ follower_id: targetUid, following_id: currentUser.id });
-  followsCache = followsCache.filter(f => !(
-    (f.follower_id === currentUser.id && f.following_id === targetUid) ||
-    (f.follower_id === targetUid && f.following_id === currentUser.id)
-  ));
-  if (liveRoomChannel) liveRoomChannel.send({ type: "broadcast", event: "room-ban", payload: { user_id: targetUid } });
-  liveViewerIds = liveViewerIds.filter(id => id !== targetUid);
-  showToast("🚫 تم حظر المستخدم من البث وإلغاء المتابعة فوراً");
-  await loadLiveRoomState();
-  openLiveBanModal(null);
-}
-
-async function unbanUserFromLive(targetUid) {
-  if (!activeLiveRoom || activeLiveRoom.host_id !== currentUser?.id) return;
-  const meta = parseRoomMeta(activeLiveRoom.title);
-  const nextBl = (meta.bl || []).filter(id => id !== targetUid);
-  await updateLiveRoomMeta({ bl: nextBl });
-  showToast("✅ تم إزالة الحظر عن المستخدم");
-  openLiveBanModal(null);
-}
-/* === صندوق الهدايا الجديد (ستايل تيك توك) === */
-function refreshGiftSwitchHeader() {
-  if (!activeLiveRoom) return;
-  const hostId = activeLiveRoom.host_id;
-  const tp = profilesMap[selectedGiftTargetId] || {};
-  setAvatarContent($("liveGiftRecAv"), tp.avatar_url, tp.username);
-  $("liveGiftRecName").textContent = (selectedGiftTargetId === hostId ? "👑 " : "") + "@" + (tp.username || "المضيف");
-  const myPts = liveSupportersMap[currentUser?.id] || 0;
-  const lvl = Math.min(50, Math.floor(myPts / 100) + 1);
-  if ($("liveGiftSenderLvl")) $("liveGiftSenderLvl").textContent = String(lvl);
-  if ($("liveGiftProgressFill")) $("liveGiftProgressFill").style.width = Math.min(100, (myPts % 100) || 18) + "%";
-  if ($("liveGiftSupText")) $("liveGiftSupText").textContent = `نقاط دعمك: ${myPts} ✨`;
-}
-
-function openLiveGiftsModal(preselectedUserId = null) {
-  if (!activeLiveRoom || !currentUser) return;
-  const hostId = activeLiveRoom.host_id;
-  const seatedIds = liveSeatsCache.filter(s => s.status === "seated").map(s => s.user_id);
-  const candidates = [hostId, ...seatedIds.filter(id => id !== hostId)];
-  if (preselectedUserId && candidates.includes(preselectedUserId)) selectedGiftTargetId = preselectedUserId;
-  else if (!selectedGiftTargetId || !candidates.includes(selectedGiftTargetId)) selectedGiftTargetId = hostId;
-
-  const tRow = $("liveGiftTargetsRow"); tRow.textContent = ""; tRow.hidden = true;
-  candidates.forEach(uid => {
-    const p = profilesMap[uid] || {};
-    const chip = document.createElement("button"); chip.type = "button";
-    chip.className = "gift-target-chip" + (selectedGiftTargetId === uid ? " active" : "");
-    const av = document.createElement("div"); av.className = "tav"; setAvatarContent(av, p.avatar_url, p.username);
-    const sp = document.createElement("span");
-    sp.textContent = (uid === hostId ? "👑 " : "") + "@" + (p.username || "عضو");
-    chip.append(av, sp);
-    chip.onclick = () => {
-      selectedGiftTargetId = uid;
-      tRow.querySelectorAll(".gift-target-chip").forEach(c => c.classList.remove("active"));
-      chip.classList.add("active");
-      refreshGiftSwitchHeader();
-      tRow.hidden = true;
-    };
-    tRow.appendChild(chip);
-  });
-
-  refreshGiftSwitchHeader();
-  renderGiftGridTiles();
-  $("dzLiveGiftsModal").hidden = false;
-}
-
-function renderGiftGridTiles() {
-  const grid = $("liveGiftsGrid"); grid.textContent = "";
-  LIVE_GIFTS.forEach(g => {
-    const isSel = selectedGiftId === g.id;
-    const tile = document.createElement("div");
-    tile.className = "gift-tile-pro" + (isSel ? " selected" : "");
-    if (g.type === "video") {
-      const vt = document.createElement("span"); vt.className = "gift-tile-vid-tag"; vt.textContent = "🎬"; tile.appendChild(vt);
-    }
-    const media = document.createElement("div"); media.className = "gift-tile-media";
-    const imgSrc = g.thumb || g.src;
-    if (imgSrc && imgSrc.endsWith(".png")) {
-      const img = document.createElement("img"); img.src = imgSrc; img.alt = g.name;
-      img.onerror = () => { img.remove(); media.textContent = g.emoji; };
-      media.appendChild(img);
-    } else media.textContent = g.emoji;
-    tile.appendChild(media);
-
-    if (isSel) {
-      const pts = document.createElement("div"); pts.className = "gift-tile-pts"; pts.textContent = `${g.points} 🪙`;
-      const sBtn = document.createElement("button"); sBtn.type = "button"; sBtn.className = "gift-tile-send-btn"; sBtn.textContent = "إرسال";
-      sBtn.onclick = e => {
-        e.stopPropagation();
-        sendLiveGift(g.id, selectedGiftTargetId);
-        $("dzLiveGiftsModal").hidden = true;
-      };
-      tile.append(pts, sBtn);
-    } else {
-      const nm = document.createElement("div"); nm.className = "gift-tile-name"; nm.textContent = g.name;
-      const pts = document.createElement("div"); pts.className = "gift-tile-pts"; pts.textContent = `${g.points} 🪙`;
-      tile.append(nm, pts);
-    }
-    tile.onclick = () => { selectedGiftId = g.id; renderGiftGridTiles(); };
-    grid.appendChild(tile);
-  });
-}
-
-$("liveGiftSwitchBtn").addEventListener("click", () => {
-  const row = $("liveGiftTargetsRow");
-  if (row) row.hidden = !row.hidden;
-});
-$("liveGiftsBtn").addEventListener("click", () => openLiveGiftsModal());
-$("dzCloseLiveGifts").addEventListener("click", () => { $("dzLiveGiftsModal").hidden = true; });
-$("dzLiveGiftsModal").addEventListener("click", e => { if (e.target === $("dzLiveGiftsModal")) $("dzLiveGiftsModal").hidden = true; });
-
-async function sendLiveGift(giftId, targetUserId) {
-  if (!activeLiveRoom || !currentUser) return;
-  const gift = LIVE_GIFTS.find(g => g.id === giftId); if (!gift) return;
-  const hostId = activeLiveRoom.host_id;
-  const validIds = new Set([hostId, ...liveSeatsCache.filter(s => s.status === "seated").map(s => s.user_id)]);
-  const recId = validIds.has(targetUserId) ? targetUserId : hostId;
-
-  const newTotal = (liveGiftPointsMap[recId] || 0) + gift.points;
-  liveGiftPointsMap[recId] = newTotal;
-  liveSupportersMap[currentUser.id] = (liveSupportersMap[currentUser.id] || 0) + gift.points;
-  if (!liveRecipientDonorsMap[recId]) liveRecipientDonorsMap[recId] = {};
-  liveRecipientDonorsMap[recId][currentUser.id] = (liveRecipientDonorsMap[recId][currentUser.id] || 0) + gift.points;
-
-  updateLivePointsBadges();
-  renderTopSupporters();
-
-  const payload = {
-    giftId: gift.id,
-    giftName: gift.name,
-    giftEmoji: gift.emoji,
-    points: gift.points,
-    totalPoints: newTotal,
-    senderTotal: liveSupportersMap[currentUser.id],
-    senderToRecTotal: liveRecipientDonorsMap[recId][currentUser.id],
-    senderId: currentUser.id,
-    senderName: currentProfile?.username || "عضو",
-    senderAvatar: currentProfile?.avatar_url || "",
-    recipientId: recId,
-    recipientName: profilesMap[recId]?.username || "المضيف"
-  };
-
-  if (liveRoomChannel) {
-    liveRoomChannel.send({ type: "broadcast", event: "live-gift", payload });
-    liveRoomChannel.track({
-      user_id: currentUser.id, is_speaker: amISpeakerNow, decor: mySeatDecorUrl,
-      points_map: liveGiftPointsMap, supporters_map: liveSupportersMap, donors_map: liveRecipientDonorsMap
-    }).catch(() => {});
-  }
-  enqueueLiveGiftAnimation(payload);
-}
-
-function enqueueLiveGiftAnimation(payload) {
-  liveGiftQueue.push(payload);
-  if (!isPlayingGiftAnim) playNextGiftInQueue();
-}
-
-function spawnGiftParticles(emoji) {
-  const layer = $("liveGiftParticles"); layer.textContent = "";
-  const items = [emoji, "💛", "✨", "❤️", "🌸", emoji, "✨", "💛"];
-  items.forEach((sym, i) => {
-    const sp = document.createElement("span"); sp.className = "gift-particle";
-    sp.textContent = sym;
-    sp.style.left = (10 + (i * 11) % 82) + "%";
-    sp.style.bottom = (18 + (i % 3) * 14) + "%";
-    sp.style.animationDelay = (i * 0.16) + "s";
-    layer.appendChild(sp);
-  });
-}
-
-function playNextGiftInQueue() {
-  if (!liveGiftQueue.length || !activeLiveRoom) {
-    isPlayingGiftAnim = false;
-    $("liveGiftOverlay").hidden = true;
-    const v = $("liveGiftVideo"); if (v) { v.pause(); v.removeAttribute("src"); }
-    return;
-  }
-  isPlayingGiftAnim = true;
-  clearTimeout(giftAnimTimeout);
-  const p = liveGiftQueue.shift();
-  const gift = LIVE_GIFTS.find(g => g.id === p.giftId) || LIVE_GIFTS[0];
-
-  setAvatarContent($("liveGiftSenderAv"), p.senderAvatar, p.senderName);
-  $("liveGiftBannerTitle").textContent = `${p.senderName} أرسل لك ${gift.name}`;
-  $("liveGiftBannerSub").textContent = `+${gift.points} نقطة إلى @${p.recipientName} • شكراً على الهدية ❤️`;
-  $("liveGiftBannerIco").textContent = gift.emoji;
-  spawnGiftParticles(gift.emoji);
-
-  const vWrap = $("liveGiftVideoWrap"), iWrap = $("liveGiftImageWrap"), vid = $("liveGiftVideo"), img = $("liveGiftImg"), fb = $("liveGiftFallbackArt");
-  $("liveGiftOverlay").hidden = false;
-
-  const finishStep = () => {
-    clearTimeout(giftAnimTimeout);
-    vid.onended = null; vid.onerror = null;
-    try { vid.pause(); } catch {}
-    playNextGiftInQueue();
-  };
-
-  const showImageMode = (durationMs = 3600) => {
-    vWrap.hidden = true; iWrap.hidden = false;
-    fb.textContent = gift.emoji; fb.hidden = false; img.hidden = true;
-    const imgSrc = gift.thumb || gift.src;
-    if (gift.type === "image" || imgSrc.endsWith(".png")) {
-      img.onload = () => { img.hidden = false; fb.hidden = true; };
-      img.onerror = () => { img.hidden = true; fb.hidden = false; };
-      img.src = imgSrc;
-    }
-    giftAnimTimeout = setTimeout(finishStep, durationMs);
-  };
-
-  if (gift.type === "video") {
-    iWrap.hidden = true; vWrap.hidden = false;
-    vid.muted = false; vid.src = gift.src; vid.currentTime = 0;
-    vid.onended = finishStep;
-    vid.onerror = () => { showImageMode(3800); };
-    vid.play().catch(() => {
-      vid.muted = true;
-      vid.play().catch(() => showImageMode(3800));
-    });
-    giftAnimTimeout = setTimeout(finishStep, (gift.dur || 8500) + 1200);
-  } else {
-    showImageMode(3600);
-  }
-}
-
-/* === قائمة المشاهدين في الأعلى === */
-function openLiveViewersModal() {
-  if (!activeLiveRoom) return;
-  const hostId = activeLiveRoom.host_id;
-  const seatedSet = new Set(liveSeatsCache.filter(s => s.status === "seated").map(s => s.user_id));
-  const ids = [...new Set([hostId, ...seatedSet, ...liveViewerIds, currentUser?.id].filter(Boolean))];
-  $("liveViewersModalCount").textContent = String(Math.max(ids.length, liveViewersCount));
-  const list = $("liveViewersModalList"); list.textContent = "";
-  ids.sort((a, b) => {
-    if (a === hostId) return -1; if (b === hostId) return 1;
-    return (liveSupportersMap[b] || 0) - (liveSupportersMap[a] || 0);
-  });
-  ids.forEach(uid => {
-    const p = profilesMap[uid] || {};
-    const row = document.createElement("div"); row.className = "viewer-row";
-    const right = document.createElement("div"); right.className = "viewer-row-r";
-    const av = document.createElement("div"); av.className = "viewer-row-av"; setAvatarContent(av, p.avatar_url, p.username);
-    const txt = document.createElement("div"); txt.className = "viewer-row-txt";
-    const st = document.createElement("strong"); st.textContent = "@" + (p.username || "عضو");
-    const sm = document.createElement("small"); sm.textContent = (liveSupportersMap[uid] || 0) > 0 ? `دعم بـ ${liveSupportersMap[uid]} نقطة 🎁` : (p.country || "DZ-CHAT");
-    txt.append(st, sm); right.append(av, txt);
-
-    const role = document.createElement("span");
-    const isH = uid === hostId, isG = seatedSet.has(uid);
-    role.className = "viewer-role-tag" + (isH ? " host" : (isG ? " guest" : ""));
-    role.textContent = isH ? "المضيف 👑" : (isG ? "ضيف 🎙️" : "مشاهد");
-    row.append(right, role);
-    row.onclick = () => { $("dzLiveViewersModal").hidden = true; openLiveUserCard(uid); };
-    list.appendChild(row);
-  });
-  $("dzLiveViewersModal").hidden = false;
-}
-$("liveViewersCount").addEventListener("click", openLiveViewersModal);
-$("liveTopSupporters").addEventListener("click", openLiveViewersModal);
-$("dzCloseLiveViewers").addEventListener("click", () => { $("dzLiveViewersModal").hidden = true; });
-$("dzLiveViewersModal").addEventListener("click", e => { if (e.target === $("dzLiveViewersModal")) $("dzLiveViewersModal").hidden = true; });
-
-/* === نافذة المساهمون ونقاط الضيف (الشارة الزرقاء ★) === */
-function openGuestContributorsModal(guestId) {
-  if (!activeLiveRoom || !guestId) return;
-  activeContribGuestId = guestId;
-  const gp = profilesMap[guestId] || {};
-  $("contribGuestTitle").textContent = "نقاط " + (gp.username || "الضيف");
-  $("contribGuestTotal").textContent = String(liveGiftPointsMap[guestId] || 0);
-  setAvatarContent($("contribGuestAv"), gp.avatar_url, gp.username);
-
-  const donors = liveRecipientDonorsMap[guestId] || {};
-  const ranked = Object.entries(donors).filter(([, pts]) => pts > 0).sort((a, b) => b[1] - a[1]);
-  const list = $("contribList"); list.textContent = "";
-  if (!ranked.length) {
-    list.innerHTML = `<p style="text-align:center;color:#94a3b8;font-size:12px;padding:28px 0;">لا يوجد مساهمون لهذا المقعد بعد. كن أول من يرسل هدية! 🎁</p>`;
-  } else {
-    ranked.forEach(([uid, pts], idx) => {
-      const up = profilesMap[uid] || {};
-      const row = document.createElement("div"); row.className = "contrib-row";
-      const rBox = document.createElement("div"); rBox.className = "contrib-row-r";
-      const rk = document.createElement("span"); rk.className = "contrib-rank " + (idx < 3 ? `r${idx + 1}` : ""); rk.textContent = String(idx + 1);
-      const av = document.createElement("div"); av.className = "contrib-row-av"; setAvatarContent(av, up.avatar_url, up.username);
-      const nm = document.createElement("strong"); nm.textContent = up.username || "عضو"; nm.style.fontSize = "13px";
-      rBox.append(rk, av, nm);
-      const pTxt = document.createElement("strong"); pTxt.textContent = String(pts); pTxt.style.fontSize = "14px";
-      row.append(rBox, pTxt);
-      row.onclick = () => { $("dzLiveContributorsModal").hidden = true; openLiveUserCard(uid); };
-      list.appendChild(row);
-    });
-  }
-
-  const myPts = donors[currentUser?.id] || 0;
-  const myRankIdx = ranked.findIndex(([uid]) => uid === currentUser?.id);
-  $("contribMyName").textContent = currentProfile?.username || "أنت";
-  $("contribMyPts").textContent = myPts > 0 ? `${myPts} ★ من النقاط` : "أرسل هدية لدخول الترتيب";
-  $("contribMyRank").textContent = myRankIdx >= 0 ? String(myRankIdx + 1) : "-";
-  setAvatarContent($("contribMyAv"), currentProfile?.avatar_url, "حسابي");
-  $("dzLiveContributorsModal").hidden = false;
-}
-$("contribHelpBtn").addEventListener("click", () => showToast("تُحسب النقاط من مجموع الهدايا المُرسلة لهذا المقعد ★"));
-$("contribSendGiftBtn").addEventListener("click", () => {
-  const tid = activeContribGuestId;
-  $("dzLiveContributorsModal").hidden = true;
-  openLiveGiftsModal(tid);
-});
-$("dzLiveContributorsModal").addEventListener("click", e => { if (e.target === $("dzLiveContributorsModal")) $("dzLiveContributorsModal").hidden = true; });
-
-/* === بطاقة الملف المصغر داخل البث + نظام الحظر الفوري === */
 function openLiveUserCard(uid) {
   if (!activeLiveRoom || !currentUser || !uid) return;
   activeLiveCardUserId = uid;
@@ -1848,6 +1492,7 @@ async function flipSeatCamera() {
 
 seatPhotoInput.addEventListener("change", async e => {
   const file = e.target.files[0]; if (!file || !currentUser || !activeLiveRoom) return;
+  if (!isSafeImageFile(file, 5)) { e.target.value = ""; return; }
   showToast("جارٍ وضع الصورة في المقعد...");
   try {
     const ext = file.name.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
@@ -1868,7 +1513,7 @@ seatPhotoInput.addEventListener("change", async e => {
 });
 
 async function requestToJoinSeat() {
-  if (!activeLiveRoom || !currentUser) return;
+  if (!activeLiveRoom || !currentUser || !checkRateLimit("joinSeat", 1000)) return;
   try {
     const { error } = await db.from("live_seats").upsert({ room_id: activeLiveRoom.id, user_id: currentUser.id, status: "pending", seat_number: null, is_muted: false }, { onConflict: "room_id,user_id" });
     if (error) throw error;
@@ -1941,6 +1586,7 @@ $("liveBgPresets").addEventListener("click", async e => {
 
 $("liveBgFile").addEventListener("change", async e => {
   const file = e.target.files[0]; if (!file || !currentUser) return;
+  if (!isSafeImageFile(file, 5)) { e.target.value = ""; return; }
   showToast("جارٍ رفع الخلفية...");
   try {
     const ext = file.name.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
@@ -2034,6 +1680,7 @@ function renderLiveShareFriends() {
     const sm = document.createElement("small"); sm.textContent = f.username;
     btn.append(av, sm);
     btn.onclick = async () => {
+      if (!checkRateLimit("shareFriend", 600)) return;
       const meta = parseRoomMeta(activeLiveRoom.title), hn = profilesMap[activeLiveRoom.host_id]?.username || "host";
       const { error } = await db.from("messages").insert({ sender_id: currentUser.id, receiver_id: f.id, content: JSON.stringify({ dz_live_invite: true, roomId: activeLiveRoom.id, title: meta.t, hostName: hn }) });
       if (error) $("liveShareStatus").textContent = "تعذر الإرسال: " + error.message;
@@ -2066,6 +1713,7 @@ $("liveShareBtn").addEventListener("click", () => {
   const extRow = $("liveShareExternalRow"); extRow.textContent = "";
   const extItems = [
     { label: "إعادة النشر", ico: "🔁", bg: "#f59e0b", fn: async () => {
+      if (!checkRateLimit("sharePub", 1000)) return;
       await db.from("messages").insert({ sender_id: currentUser.id, receiver_id: null, content: JSON.stringify({ dz_live_invite: true, roomId: activeLiveRoom.id, title: meta.t, hostName: hn }) });
       incShare(); $("liveShareStatus").textContent = "✅ تمت مشاركة البث في الشات العام";
     }},
@@ -2073,10 +1721,10 @@ $("liveShareBtn").addEventListener("click", () => {
       try { await navigator.clipboard.writeText(shareUrl); } catch {}
       incShare(); $("liveShareStatus").textContent = "✅ تم نسخ رابط البث";
     }},
-    { label: "WhatsApp", ico: "💬", bg: "#22c55e", fn: () => { incShare(); window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, "_blank"); } },
-    { label: "Telegram", ico: "✈️", bg: "#0ea5e9", fn: () => { incShare(); window.open(`https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`, "_blank"); } },
-    { label: "Messenger", ico: "⚡", bg: "#6366f1", fn: async () => { incShare(); if (navigator.share) { try { await navigator.share({ title: meta.t, text: shareText, url: shareUrl }); return; } catch {} } window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, "_blank"); } },
-    { label: "Facebook", ico: "f", bg: "#1877f2", fn: () => { incShare(); window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, "_blank"); } }
+    { label: "WhatsApp", ico: "💬", bg: "#22c55e", fn: () => { incShare(); window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, "_blank", "noopener,noreferrer"); } },
+    { label: "Telegram", ico: "✈️", bg: "#0ea5e9", fn: () => { incShare(); window.open(`https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`, "_blank", "noopener,noreferrer"); } },
+    { label: "Messenger", ico: "⚡", bg: "#6366f1", fn: async () => { incShare(); if (navigator.share) { try { await navigator.share({ title: meta.t, text: shareText, url: shareUrl }); return; } catch {} } window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, "_blank", "noopener,noreferrer"); } },
+    { label: "Facebook", ico: "f", bg: "#1877f2", fn: () => { incShare(); window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, "_blank", "noopener,noreferrer"); } }
   ];
   extItems.forEach(it => {
     const b = document.createElement("button"); b.type = "button"; b.className = "share-app-btn";
@@ -2134,7 +1782,7 @@ function renderLiveComments() {
 $("liveReqToggleBtn").addEventListener("click", () => { $("liveRequestsDrawer").hidden = !$("liveRequestsDrawer").hidden; });
 $("liveCommentForm").addEventListener("submit", async e => {
   e.preventDefault(); if (!currentUser || !activeLiveRoom) return;
-  const content = $("liveCommentInput").value.trim(); if (!content) return;
+  const content = cleanText($("liveCommentInput").value, 300); if (!content || !checkRateLimit("liveComment", 400)) return;
   $("liveCommentInput").value = "";
   const { error } = await db.from("live_comments").insert({ room_id: activeLiveRoom.id, user_id: currentUser.id, content });
   if (error) showToast("فشل إرسال التعليق: " + error.message);
@@ -2232,22 +1880,23 @@ async function setupLiveRoomRealtime(roomId) {
     .on("broadcast", { event: "clear-comments" }, () => { liveCommentsCache = []; renderLiveComments(); })
     .on("broadcast", { event: "seat-decor" }, ({ payload }) => {
       if (payload?.user_id) {
-        if (payload.url) seatDecorMap[payload.user_id] = payload.url; else delete seatDecorMap[payload.user_id];
+        const su = payload.url ? safeUrl(payload.url, false) : "";
+        if (su) seatDecorMap[payload.user_id] = su; else delete seatDecorMap[payload.user_id];
         renderLiveSeatsAndControls();
       }
     })
     .on("broadcast", { event: "live-gift" }, ({ payload }) => {
       if (!payload || !activeLiveRoom) return;
       if (payload.recipientId) {
-        liveGiftPointsMap[payload.recipientId] = Math.max(liveGiftPointsMap[payload.recipientId] || 0, payload.totalPoints || 0);
+        liveGiftPointsMap[payload.recipientId] = Math.max(liveGiftPointsMap[payload.recipientId] || 0, Number(payload.totalPoints) || 0);
         if (payload.senderId) {
           if (!liveRecipientDonorsMap[payload.recipientId]) liveRecipientDonorsMap[payload.recipientId] = {};
-          liveRecipientDonorsMap[payload.recipientId][payload.senderId] = Math.max(liveRecipientDonorsMap[payload.recipientId][payload.senderId] || 0, payload.senderToRecTotal || payload.points || 0);
+          liveRecipientDonorsMap[payload.recipientId][payload.senderId] = Math.max(liveRecipientDonorsMap[payload.recipientId][payload.senderId] || 0, Number(payload.senderToRecTotal) || Number(payload.points) || 0);
         }
         updateLivePointsBadges();
       }
       if (payload.senderId && payload.senderTotal) {
-        liveSupportersMap[payload.senderId] = Math.max(liveSupportersMap[payload.senderId] || 0, payload.senderTotal);
+        liveSupportersMap[payload.senderId] = Math.max(liveSupportersMap[payload.senderId] || 0, Number(payload.senderTotal) || 0);
         renderTopSupporters();
       }
       enqueueLiveGiftAnimation(payload);
@@ -2267,19 +1916,20 @@ async function setupLiveRoomRealtime(roomId) {
         if (!p.user_id) continue;
         if (p.decor !== undefined) {
           const prev = seatDecorMap[p.user_id] || "";
-          if (prev !== (p.decor || "")) { if (p.decor) seatDecorMap[p.user_id] = p.decor; else delete seatDecorMap[p.user_id]; decorChanged = true; }
+          const nextD = p.decor ? safeUrl(p.decor, false) : "";
+          if (prev !== nextD) { if (nextD) seatDecorMap[p.user_id] = nextD; else delete seatDecorMap[p.user_id]; decorChanged = true; }
         }
         if (p.points_map && typeof p.points_map === "object") {
-          for (const [uid, pts] of Object.entries(p.points_map)) { if ((pts || 0) > (liveGiftPointsMap[uid] || 0)) { liveGiftPointsMap[uid] = pts; pointsChanged = true; } }
+          for (const [uid, pts] of Object.entries(p.points_map)) { if ((Number(pts) || 0) > (liveGiftPointsMap[uid] || 0)) { liveGiftPointsMap[uid] = Number(pts) || 0; pointsChanged = true; } }
         }
         if (p.supporters_map && typeof p.supporters_map === "object") {
-          for (const [uid, pts] of Object.entries(p.supporters_map)) { if ((pts || 0) > (liveSupportersMap[uid] || 0)) { liveSupportersMap[uid] = pts; supChanged = true; } }
+          for (const [uid, pts] of Object.entries(p.supporters_map)) { if ((Number(pts) || 0) > (liveSupportersMap[uid] || 0)) { liveSupportersMap[uid] = Number(pts) || 0; supChanged = true; } }
         }
         if (p.donors_map && typeof p.donors_map === "object") {
           for (const [recId, dObj] of Object.entries(p.donors_map)) {
             if (!liveRecipientDonorsMap[recId]) liveRecipientDonorsMap[recId] = {};
             for (const [sId, pts] of Object.entries(dObj || {})) {
-              if ((pts || 0) > (liveRecipientDonorsMap[recId][sId] || 0)) liveRecipientDonorsMap[recId][sId] = pts;
+              if ((Number(pts) || 0) > (liveRecipientDonorsMap[recId][sId] || 0)) liveRecipientDonorsMap[recId][sId] = Number(pts) || 0;
             }
           }
         }
@@ -2301,14 +1951,15 @@ function buildFeedSlide(post) {
   const slide = document.createElement("div");
   slide.className = "video-slide";
   slide.dataset.videoId = post.id;
+  const mediaSrc = safeUrl(post.video_url, false);
 
   if (isImagePost(post)) {
     const imgEl = document.createElement("img");
-    imgEl.className = "feed-photo"; imgEl.src = post.video_url; imgEl.alt = post.caption || "صورة";
+    imgEl.className = "feed-photo"; imgEl.src = mediaSrc; imgEl.alt = post.caption || "صورة";
     slide.appendChild(imgEl);
   } else {
     const vidEl = document.createElement("video");
-    vidEl.src = post.video_url; vidEl.playsInline = true; vidEl.loop = true; vidEl.preload = "metadata";
+    vidEl.src = mediaSrc; vidEl.playsInline = true; vidEl.loop = true; vidEl.preload = "metadata";
     vidEl.addEventListener("click", () => { if (vidEl.paused) vidEl.play().catch(() => {}); else vidEl.pause(); });
     slide.appendChild(vidEl);
   }
@@ -2447,28 +2098,27 @@ $("postOptEditBtn").addEventListener("click", () => {
   $("dzPostOptionsModal").hidden = true; activeEditPost = activeOptionsPost; editPostMediaFile = null; editPostMediaType = null;
   $("editPostMediaFile").value = ""; $("editPostStatus").textContent = ""; $("editPostCaption").value = activeEditPost.caption || "";
   const prev = $("editPostPreview"); prev.textContent = "";
-  if (isImagePost(activeEditPost)) { const img = document.createElement("img"); img.src = activeEditPost.video_url; prev.appendChild(img); }
-  else { const vid = document.createElement("video"); vid.src = activeEditPost.video_url; vid.controls = true; vid.playsInline = true; prev.appendChild(vid); }
+  const ms = safeUrl(activeEditPost.video_url, false);
+  if (isImagePost(activeEditPost)) { const img = document.createElement("img"); img.src = ms; prev.appendChild(img); }
+  else { const vid = document.createElement("video"); vid.src = ms; vid.controls = true; vid.playsInline = true; prev.appendChild(vid); }
   prev.hidden = false; $("dzEditPostModal").hidden = false;
 });
 $("dzCloseEditPost").addEventListener("click", () => { $("dzEditPostModal").hidden = true; });
 $("dzEditPostModal").addEventListener("click", e => { if (e.target === $("dzEditPostModal")) $("dzEditPostModal").hidden = true; });
 $("editPostMediaFile").addEventListener("change", e => {
   const file = e.target.files[0]; if (!file) return;
-  const isImg = file.type.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
-  const isVid = file.type.startsWith("video/") || /\.(mp4|mov|webm|mkv|3gp)$/i.test(file.name);
-  if (!isImg && !isVid) { showToast("اختر صورة أو فيديو صالحاً"); return; }
-  if (file.size > 50 * 1024 * 1024) { showToast("حجم الملف أكبر من 50 MB"); return; }
-  editPostMediaFile = file; editPostMediaType = isImg ? "image" : "video";
+  const kind = isSafeVideoOrImageFile(file, 50);
+  if (!kind) { e.target.value = ""; return; }
+  editPostMediaFile = file; editPostMediaType = kind;
   $("editPostStatus").textContent = "تم اختيار ملف جديد: " + file.name;
   const prev = $("editPostPreview"); prev.textContent = ""; const url = URL.createObjectURL(file);
-  if (isImg) { const img = document.createElement("img"); img.src = url; prev.appendChild(img); }
+  if (kind === "image") { const img = document.createElement("img"); img.src = url; prev.appendChild(img); }
   else { const vid = document.createElement("video"); vid.src = url; vid.controls = true; vid.playsInline = true; prev.appendChild(vid); }
   prev.hidden = false;
 });
 $("saveEditPostBtn").addEventListener("click", async () => {
-  if (!activeEditPost || !currentUser) return;
-  const btn = $("saveEditPostBtn"), newCaption = $("editPostCaption").value.trim() || "منشور من DZ-CHAT 🇩🇿";
+  if (!activeEditPost || !currentUser || !checkRateLimit("editPost", 1000)) return;
+  const btn = $("saveEditPostBtn"), newCaption = cleanText($("editPostCaption").value, 300) || "منشور من DZ-CHAT 🇩🇿";
   btn.disabled = true; btn.textContent = "جارٍ الحفظ...";
   try {
     let videoUrl = activeEditPost.video_url, mediaType = activeEditPost.media_type;
@@ -2495,7 +2145,7 @@ function updatePostCountsInPlace(videoId) {
 }
 
 async function toggleLike(videoId) {
-  if (!currentUser) return;
+  if (!currentUser || !checkRateLimit("like", 250)) return;
   const exists = likesCache.some(l => l.video_id === videoId && l.user_id === currentUser.id);
   try {
     if (exists) {
@@ -2511,7 +2161,7 @@ async function toggleLike(videoId) {
 }
 
 async function toggleFollow(targetUserId) {
-  if (!currentUser || targetUserId === currentUser.id) return;
+  if (!currentUser || targetUserId === currentUser.id || !checkRateLimit("follow", 350)) return;
   const exists = followsCache.some(f => f.follower_id === currentUser.id && f.following_id === targetUserId);
   try {
     if (exists) {
@@ -2537,7 +2187,7 @@ async function openComments(videoId) {
   activeCommentVideoId = videoId; $("dzCommentsModal").hidden = false;
   const list = $("commentsList"); list.innerHTML = `<p style="text-align:center;color:#64748b;font-size:13px">جارٍ التحميل...</p>`;
   const { data, error } = await db.from("video_comments").select("*").eq("video_id", videoId).order("created_at", { ascending: true });
-  if (error) { list.innerHTML = `<div class="modal-error">${error.message}</div>`; return; }
+  if (error) { list.innerHTML = `<div class="modal-error"></div>`; list.querySelector(".modal-error").textContent = error.message; return; }
   list.textContent = "";
   if (!data.length) { list.innerHTML = `<p style="text-align:center;color:#64748b;font-size:13px;padding:12px 0">لا توجد تعليقات بعد.</p>`; return; }
   data.forEach(c => {
@@ -2553,7 +2203,7 @@ $("dzCloseComments").addEventListener("click", () => { activeCommentVideoId = nu
 $("dzCommentsModal").addEventListener("click", e => { if (e.target === $("dzCommentsModal")) { activeCommentVideoId = null; $("dzCommentsModal").hidden = true; } });
 $("commentForm").addEventListener("submit", async e => {
   e.preventDefault(); if (!currentUser || !activeCommentVideoId) return;
-  const content = $("commentInput").value.trim(); if (!content) return;
+  const content = cleanText($("commentInput").value, 300); if (!content || !checkRateLimit("comment", 400)) return;
   const btn = e.submitter; btn.disabled = true;
   try {
     const { data, error } = await db.from("video_comments").insert({ video_id: activeCommentVideoId, user_id: currentUser.id, content }).select().single();
@@ -2576,7 +2226,7 @@ $("dzCloseShare").addEventListener("click", () => { $("dzShareModal").hidden = t
 $("dzShareModal").addEventListener("click", e => { if (e.target === $("dzShareModal")) $("dzShareModal").hidden = true; });
 
 async function sendPostToChat(receiverId) {
-  if (!currentUser || !activeSharePost) return;
+  if (!currentUser || !activeSharePost || !checkRateLimit("shareChat", 500)) return;
   const cn = profilesMap[activeSharePost.user_id]?.username || "user";
   const payload = JSON.stringify({ dz_share: true, type: isImagePost(activeSharePost) ? "image" : "video", creator: cn, caption: activeSharePost.caption || "", url: activeSharePost.video_url });
   const { error } = await db.from("messages").insert({ sender_id: currentUser.id, receiver_id: receiverId, content: payload });
@@ -2592,19 +2242,18 @@ $("shareExternalBtn").addEventListener("click", async () => {
 
 $("videoFile").addEventListener("change", event => {
   const file = event.target.files[0]; if (!file) return;
-  const isImg = file.type.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
-  const isVid = file.type.startsWith("video/") || /\.(mp4|mov|webm|mkv|3gp)$/i.test(file.name);
-  if (!isImg && !isVid) { showToast("اختر صورة أو فيديو صحيحاً"); return; }
-  if (file.size > 50 * 1024 * 1024) { showToast("حجم الملف أكبر من 50 MB"); return; }
-  selectedMedia = file; selectedMediaType = isImg ? "image" : "video";
-  $("uploadStatus").textContent = `تم اختيار ${isImg ? "الصورة" : "الفيديو"}: ${file.name}`;
+  const kind = isSafeVideoOrImageFile(file, 50);
+  if (!kind) { event.target.value = ""; return; }
+  selectedMedia = file; selectedMediaType = kind;
+  $("uploadStatus").textContent = `تم اختيار ${kind === "image" ? "الصورة" : "الفيديو"}: ${file.name}`;
   const prev = $("uploadPreview"); prev.textContent = ""; const url = URL.createObjectURL(file);
-  if (isImg) { const img = document.createElement("img"); img.src = url; prev.appendChild(img); }
+  if (kind === "image") { const img = document.createElement("img"); img.src = url; prev.appendChild(img); }
   else { const vid = document.createElement("video"); vid.src = url; vid.controls = true; vid.playsInline = true; prev.appendChild(vid); }
   prev.hidden = false;
 });
 $("publishBtn").addEventListener("click", async () => {
   if (!currentUser || !selectedMedia) { showToast("اختر صورة أو فيديو أولاً"); return; }
+  if (!checkRateLimit("publish", 1500)) return;
   const btn = $("publishBtn"); btn.disabled = true; btn.textContent = "جارٍ النشر...";
   try {
     const ext = selectedMedia.name.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || (selectedMediaType === "image" ? "jpg" : "mp4");
@@ -2612,7 +2261,7 @@ $("publishBtn").addEventListener("click", async () => {
     const { error: upErr } = await db.storage.from(STORAGE_BUCKET).upload(filePath, selectedMedia, { contentType: selectedMedia.type });
     if (upErr) throw upErr;
     const { data: pub } = db.storage.from(STORAGE_BUCKET).getPublicUrl(filePath);
-    const caption = $("newCaption").value.trim() || "منشور جديد من DZ-CHAT 🇩🇿";
+    const caption = cleanText($("newCaption").value, 300) || "منشور جديد من DZ-CHAT 🇩🇿";
     const { error: dbErr } = await db.from("videos").insert({ user_id: currentUser.id, video_url: pub.publicUrl, caption, media_type: selectedMediaType });
     if (dbErr) throw dbErr;
     selectedMedia = null; $("videoFile").value = ""; $("newCaption").value = ""; $("uploadStatus").textContent = ""; $("uploadPreview").hidden = true;
@@ -2697,7 +2346,8 @@ function renderInbox() {
 
   const pubRow = document.createElement("button"); pubRow.type = "button"; pubRow.className = "inbox-row";
   const lastPub = allMessagesCache.find(m => m.receiver_id === null);
-  pubRow.innerHTML = `<div class="inbox-row-main"><div class="inbox-avatar"><div class="inbox-avatar-inner pub-sys">🌐</div></div><div class="inbox-row-text"><strong>شات الأصدقاء العام</strong><small>${lastPub ? formatMsgPreview(lastPub) : "محادثة مفتوحة للجميع"}</small></div></div><div class="inbox-row-side"><span>📷</span></div>`;
+  pubRow.innerHTML = `<div class="inbox-row-main"><div class="inbox-avatar"><div class="inbox-avatar-inner pub-sys">🌐</div></div><div class="inbox-row-text"><strong>شات الأصدقاء العام</strong><small></small></div></div><div class="inbox-row-side"><span>📷</span></div>`;
+  pubRow.querySelector("small").textContent = lastPub ? formatMsgPreview(lastPub) : "محادثة مفتوحة للجميع";
   pubRow.onclick = () => openPrivateChat(null); list.appendChild(pubRow);
 
   others.sort((a, b) => {
@@ -2898,6 +2548,7 @@ $("chatCamBtn").addEventListener("click", () => $("chatCamInput").click());
 
 async function handleChatImageUpload(e) {
   const file = e.target.files[0]; if (!file || !currentUser || activeChatUserId === "__none__") return;
+  if (!isSafeImageFile(file, 8)) { e.target.value = ""; return; }
   showToast("جارٍ إرسال الصورة...");
   try {
     const ext = file.name.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
@@ -2972,7 +2623,7 @@ $("chatVoiceCancelBtn").addEventListener("click", () => stopVoiceRecorder(false)
 $("chatVoiceSendBtn").addEventListener("click", () => stopVoiceRecorder(true));
 
 async function sendRawMessage(content) {
-  if (!currentUser || activeChatUserId === "__none__") return;
+  if (!currentUser || activeChatUserId === "__none__" || !checkRateLimit("sendMsg", 250)) return;
   if (activeChatUserId !== null && isUserBlocked(activeChatUserId)) { showToast("هذا الحساب محظور"); return; }
   const targetId = activeChatUserId;
   const { error } = await db.from("messages").insert({ sender_id: currentUser.id, receiver_id: targetId, content });
@@ -2984,10 +2635,11 @@ async function sendRawMessage(content) {
 
 $("chatForm").addEventListener("submit", async e => {
   e.preventDefault();
-  const content = $("chatInput").value.trim(); if (!content) return;
+  const content = cleanText($("chatInput").value, 1000); if (!content) return;
   $("chatInput").value = "";
   await sendRawMessage(content);
 });
+
 function openMsgActionModal(msg, parsed, isMine) {
   activeActionMsg = msg;
   activeActionMsgParsed = parsed;
@@ -3018,7 +2670,7 @@ $("msgReactBar").addEventListener("click", async e => {
 
 $("msgEditSaveBtn").addEventListener("click", async () => {
   if (!activeActionMsg || activeActionMsgParsed?.kind !== "text") return;
-  const newText = $("msgEditInput").value.trim(); if (!newText) return;
+  const newText = cleanText($("msgEditInput").value, 1000); if (!newText) return;
   const uc = JSON.stringify({ dz_txt: true, text: newText, react: activeActionMsgParsed.react || "", edited: true });
   const { error } = await db.from("messages").update({ content: uc }).eq("id", activeActionMsg.id);
   $("dzMsgActionModal").hidden = true;
@@ -3095,15 +2747,16 @@ async function loadMessages() {
     } else if (parsed.kind === "share") {
       const card = document.createElement("div"); card.className = "shared-card";
       const by = document.createElement("small"); by.textContent = "📤 منشور @" + parsed.creator; card.appendChild(by);
-      if (parsed.type === "image") { const img = document.createElement("img"); img.src = parsed.url; card.appendChild(img); }
-      else { const vid = document.createElement("video"); vid.src = parsed.url; vid.controls = true; vid.playsInline = true; card.appendChild(vid); }
+      const su = safeUrl(parsed.url, false);
+      if (parsed.type === "image") { const img = document.createElement("img"); img.src = su; card.appendChild(img); }
+      else { const vid = document.createElement("video"); vid.src = su; vid.controls = true; vid.playsInline = true; card.appendChild(vid); }
       if (parsed.caption) { const cap = document.createElement("p"); cap.textContent = parsed.caption; card.appendChild(cap); }
       wrap.appendChild(card);
     } else if (parsed.kind === "image") {
-      const img = document.createElement("img"); img.className = "dm-img-msg"; img.src = parsed.url; wrap.appendChild(img);
+      const img = document.createElement("img"); img.className = "dm-img-msg"; img.src = safeUrl(parsed.url, true); wrap.appendChild(img);
     } else if (parsed.kind === "voice") {
       const b = document.createElement("div"); b.className = "dm-bubble";
-      const aud = document.createElement("audio"); aud.className = "dm-audio-msg"; aud.controls = true; aud.preload = "metadata"; aud.src = parsed.url;
+      const aud = document.createElement("audio"); aud.className = "dm-audio-msg"; aud.controls = true; aud.preload = "metadata"; aud.src = safeUrl(parsed.url, true);
       b.appendChild(aud); wrap.appendChild(b);
     } else {
       const b = document.createElement("div"); b.className = "dm-bubble";
@@ -3125,7 +2778,6 @@ async function loadMessages() {
   });
   box.scrollTop = box.scrollHeight;
 }
-
 function subscribeRealtimeAll() {
   if (realtimeChannel) db.removeChannel(realtimeChannel);
   realtimeChannel = db.channel("dz-chat-realtime")
@@ -3301,8 +2953,9 @@ function renderViewedUserProfile() {
   if (!items.length) { grid.innerHTML = `<div class="grid-empty">لا توجد منشورات هنا.</div>`; return; }
   items.forEach(post => {
     const tile = document.createElement("div"); tile.className = "grid-post-tile";
-    if (isImagePost(post)) { const img = document.createElement("img"); img.src = post.video_url; tile.appendChild(img); }
-    else { const vid = document.createElement("video"); vid.src = post.video_url; vid.muted = true; vid.playsInline = true; vid.preload = "metadata"; tile.appendChild(vid); }
+    const ms = safeUrl(post.video_url, false);
+    if (isImagePost(post)) { const img = document.createElement("img"); img.src = ms; tile.appendChild(img); }
+    else { const vid = document.createElement("video"); vid.src = ms; vid.muted = true; vid.playsInline = true; vid.preload = "metadata"; tile.appendChild(vid); }
     const meta = document.createElement("div"); meta.className = "grid-post-meta"; meta.textContent = `▷ ${likesCache.filter(l => l.video_id === post.id).length}`; tile.appendChild(meta);
     tile.onclick = () => { closeUserProfile(); switchPage("homePage"); setTimeout(() => { const t = $("videoFeed").querySelector(`[data-video-id="${post.id}"]`); if (t) t.scrollIntoView({ behavior: "smooth" }); }, 60); };
     grid.appendChild(tile);
@@ -3333,8 +2986,9 @@ function renderProfile() {
   }
   items.forEach(post => {
     const tile = document.createElement("div"); tile.className = "grid-post-tile";
-    if (isImagePost(post)) { const img = document.createElement("img"); img.src = post.video_url; tile.appendChild(img); }
-    else { const vid = document.createElement("video"); vid.src = post.video_url; vid.muted = true; vid.playsInline = true; vid.preload = "metadata"; tile.appendChild(vid); }
+    const ms = safeUrl(post.video_url, false);
+    if (isImagePost(post)) { const img = document.createElement("img"); img.src = ms; tile.appendChild(img); }
+    else { const vid = document.createElement("video"); vid.src = ms; vid.muted = true; vid.playsInline = true; vid.preload = "metadata"; tile.appendChild(vid); }
     const meta = document.createElement("div"); meta.className = "grid-post-meta"; meta.textContent = `▷ ${likesCache.filter(l => l.video_id === post.id).length}`; tile.appendChild(meta);
     tile.onclick = () => { switchPage("homePage"); setTimeout(() => { const t = $("videoFeed").querySelector(`[data-video-id="${post.id}"]`); if (t) t.scrollIntoView({ behavior: "smooth" }); }, 60); };
     grid.appendChild(tile);
@@ -3415,14 +3069,15 @@ $("dzCloseProfile").addEventListener("click", () => { $("dzProfileModal").hidden
 $("dzProfileModal").addEventListener("click", e => { if (e.target === $("dzProfileModal")) $("dzProfileModal").hidden = true; });
 $("dzEditAvatar").addEventListener("change", ev => {
   const f = ev.target.files[0]; if (!f) return;
-  if ((f.type && !f.type.startsWith("image/")) || f.size > 5 * 1024 * 1024) { showToast("اختر صورة أقل من 5 ميغابايت"); return; }
+  if (!isSafeImageFile(f, 5)) { ev.target.value = ""; return; }
   const r = new FileReader(); r.onload = () => setAvatarContent($("dzAvatarPreview"), r.result, "معاينة"); r.readAsDataURL(f);
 });
 $("dzSaveProfile").addEventListener("click", async () => {
-  if (!currentUser) return;
-  const btn = $("dzSaveProfile"), errBox = $("dzProfileError"), username = $("dzEditUsername").value.trim().replace(/^@/, "");
-  const bio = $("dzEditBio").value.trim(), country = $("dzEditCountry").value.trim(), imageFile = $("dzEditAvatar").files[0];
+  if (!currentUser || !checkRateLimit("saveProfile", 1200)) return;
+  const btn = $("dzSaveProfile"), errBox = $("dzProfileError"), username = cleanText($("dzEditUsername").value.replace(/^@/, ""), 30);
+  const bio = cleanText($("dzEditBio").value, 200), country = cleanText($("dzEditCountry").value, 40), imageFile = $("dzEditAvatar").files[0];
   errBox.hidden = true; if (username.length < 3) { errBox.textContent = "اسم المستخدم يجب أن يكون 3 أحرف على الأقل"; errBox.hidden = false; return; }
+  if (imageFile && !isSafeImageFile(imageFile, 5)) return;
   btn.disabled = true; btn.textContent = "جارٍ الحفظ...";
   try {
     let avatarUrl = currentProfile?.avatar_url || null;
