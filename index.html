@@ -11,8 +11,179 @@
     <link rel="manifest" href="./manifest.json" />
     <link rel="icon" type="image/png" href="./icon.png" />
     <link rel="apple-touch-icon" href="./icon.png" />
-    <title>DZ-CHAT</title>
+    <title>DZ_CHAT</title>
     <link rel="stylesheet" href="./style.css" />
+    <style id="dzAuthStyles">
+      #dzAuthOverlay {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        background: #ffffff;
+        color: #161823;
+        overflow-y: auto;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Tahoma, Arial, sans-serif;
+      }
+      .dz-auth-container {
+        width: 100%;
+        max-width: 420px;
+        min-height: 100%;
+        margin: 0 auto;
+        padding: 16px 24px 28px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .dz-auth-topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+      }
+      .dz-auth-icon-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 6px;
+        color: #161823;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .dz-auth-brand {
+        text-align: center;
+        margin: 18px 0 28px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+      .dz-auth-app-icon {
+        width: 78px;
+        height: 78px;
+        border-radius: 20px;
+        object-fit: cover;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+      }
+      .dz-auth-brand-title {
+        font-size: 26px;
+        font-weight: 800;
+        margin: 0;
+        letter-spacing: 0.5px;
+        color: #161823;
+        direction: ltr;
+      }
+      .dz-auth-input {
+        width: 100%;
+        box-sizing: border-box;
+        background: #f1f1f2;
+        border: 1.5px solid transparent;
+        border-radius: 999px;
+        padding: 14px 20px;
+        font-size: 15px;
+        color: #161823;
+        outline: none;
+        margin-bottom: 12px;
+      }
+      .dz-auth-input:focus { border-color: #d0d1d5; background: #ebebec; }
+      .dz-auth-input::placeholder { color: #8a8b91; }
+      .dz-auth-btn-primary {
+        width: 100%;
+        background: #000000;
+        color: #ffffff;
+        border: none;
+        border-radius: 999px;
+        padding: 14px;
+        font-size: 16px;
+        font-weight: 700;
+        cursor: pointer;
+        margin-top: 4px;
+      }
+      .dz-auth-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+      .dz-auth-divider {
+        display: flex;
+        align-items: center;
+        text-align: center;
+        margin: 22px 0;
+        color: #75767b;
+        font-size: 14px;
+      }
+      .dz-auth-divider::before, .dz-auth-divider::after {
+        content: "";
+        flex: 1;
+        border-bottom: 1px solid #ececee;
+      }
+      .dz-auth-divider span { padding: 0 14px; }
+      .dz-auth-btn-outline {
+        position: relative;
+        width: 100%;
+        box-sizing: border-box;
+        background: #ffffff;
+        color: #161823;
+        border: 1px solid #e3e3e4;
+        border-radius: 999px;
+        padding: 13px 44px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+      }
+      .dz-auth-btn-outline .dz-auth-btn-ico {
+        position: absolute;
+        right: 18px;
+        display: flex;
+        align-items: center;
+      }
+      .dz-auth-choice-group { display: flex; gap: 10px; margin-bottom: 14px; }
+      .dz-auth-choice-card {
+        flex: 1;
+        border: 1.5px solid #e3e3e4;
+        border-radius: 16px;
+        padding: 12px 8px;
+        text-align: center;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 600;
+        background: #fff;
+        color: #161823;
+      }
+      .dz-auth-choice-card.active { border-color: #000; background: #f5f5f7; }
+      .dz-auth-small-link {
+        display: block;
+        text-align: left;
+        font-size: 13px;
+        color: #555;
+        text-decoration: none;
+        margin: -4px 6px 14px;
+        cursor: pointer;
+      }
+      .dz-auth-bottom { text-align: center; margin-top: 24px; }
+      .dz-auth-signup-link {
+        display: inline-block;
+        color: #555;
+        font-size: 15px;
+        text-decoration: underline;
+        margin-bottom: 14px;
+        cursor: pointer;
+      }
+      .dz-auth-footer-note { font-size: 12px; color: #8a8b91; line-height: 1.6; }
+      .dz-auth-footer-note a { color: #2b6cb0; text-decoration: none; }
+      .dz-auth-msg {
+        padding: 10px 14px;
+        border-radius: 12px;
+        font-size: 13.5px;
+        margin-bottom: 14px;
+        text-align: center;
+        display: none;
+      }
+      .dz-auth-msg.error { background: #fde8e8; color: #c81e1e; display: block; }
+      .dz-auth-msg.success { background: #def7ec; color: #03543f; display: block; }
+      .dz-auth-subtitle { text-align: center; font-size: 14px; color: #666; margin: -12px 0 18px; line-height: 1.5; }
+    </style>
   </head>
   <body>
     <div class="app page-homePage" dir="rtl">
@@ -308,8 +479,9 @@
         <button type="button" id="startLiveConfirmBtn" class="choice-live-btn">بدء البث المباشر الآن</button>
         <button type="button" id="dzCloseLiveSetup" class="modal-cancel-btn">إلغاء</button>
       </div>
-            </div>
-            <div id="dzLiveRoom" dir="rtl" hidden>
+    </div>
+
+    <div id="dzLiveRoom" dir="rtl" hidden>
       <div class="live-topbar-pro">
         <div class="live-top-row-1">
           <div class="live-host-card-pro">
@@ -361,7 +533,6 @@
       </div>
       <div id="liveAudioPool" class="live-audio-pool"></div>
     </div>
-
     <div id="dzLiveGiftsModal" class="dz-modal-overlay live-gifts-sheet-overlay" dir="rtl" hidden>
       <div class="live-gifts-sheet-pro">
         <div class="gifts-pro-top">
@@ -490,6 +661,7 @@
         <button type="button" id="menuEditProfileBtn">✎ تعديل الملف الشخصي</button>
         <button type="button" id="menuThemeBtn" style="background:#1e293b;">🌓 تبديل الوضع الليلي / النهاري</button>
         <button type="button" id="menuCreateBtn" style="background:#0f172a;">➕ نشر منشور / فتح بث</button>
+        <button type="button" id="menuLinkTelegramBtn" style="background:#0284c7;" onclick="dzAuthOpenTelegramLink()">✈️ ربط تيليجرام للاستعادة</button>
         <button type="button" id="menuAdminBtn" style="background:#0284c7;" hidden>🛡️ لوحة الإدارة السرية</button>
         <button type="button" id="menuLogoutBtn" class="choice-live-btn">🚪 تسجيل الخروج</button>
       </div>
@@ -536,6 +708,108 @@
         </div>
         <input id="adminSearchInput" type="text" placeholder="🔍 بحث داخل الإدارة..." />
         <div id="adminListContainer" class="admin-list-container"></div>
+      </div>
+    </div>
+
+    <!-- شاشة تسجيل الدخول والاستعادة لتطبيق DZ_CHAT -->
+    <div id="dzAuthOverlay" dir="rtl">
+      <div class="dz-auth-container">
+        <div>
+          <div class="dz-auth-topbar">
+            <button type="button" class="dz-auth-icon-btn" onclick="dzAuthShowView('dzAuthLoginView')" title="رجوع">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+            <button type="button" class="dz-auth-icon-btn" onclick="alert('للمساعدة: يمكنك التسجيل في DZ_CHAT بالبريد الإلكتروني أو تيليجرام واستعادة كلمة المرور عبر أي منهما.')" title="مساعدة">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </button>
+          </div>
+
+          <div class="dz-auth-brand">
+            <img src="./icon.png" alt="DZ_CHAT" class="dz-auth-app-icon" />
+            <h1 class="dz-auth-brand-title">DZ_CHAT</h1>
+          </div>
+
+          <div id="dzAuthStatusMsg" class="dz-auth-msg"></div>
+
+          <div id="dzAuthLoginView">
+            <form id="dzAuthLoginForm">
+              <input type="text" id="dzAuthLoginId" class="dz-auth-input" placeholder="البريد الإلكتروني أو اسم المستخدم" required />
+              <input type="password" id="dzAuthLoginPass" class="dz-auth-input" placeholder="كلمة المرور" required />
+              <a class="dz-auth-small-link" onclick="dzAuthShowView('dzAuthForgot1View')">نسيت كلمة المرور؟</a>
+              <button type="submit" class="dz-auth-btn-primary">تسجيل الدخول</button>
+            </form>
+            <div class="dz-auth-divider"><span>أو</span></div>
+            <button type="button" class="dz-auth-btn-outline" onclick="dzAuthShowView('dzAuthRegEmailView')">
+              <span class="dz-auth-btn-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#161823" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></span>
+              المتابعة باستخدام البريد الإلكتروني
+            </button>
+            <button type="button" class="dz-auth-btn-outline" onclick="dzAuthStartTelegram()">
+              <span class="dz-auth-btn-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2AABEE"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.2-.08-.06-.19-.04-.27-.02-.12.02-1.96 1.25-5.54 3.69-.52.36-1 .53-1.42.52-.47-.01-1.37-.26-2.03-.48-.82-.27-1.47-.42-1.42-.88.03-.24.37-.48 1.02-.73 3.99-1.74 6.65-2.89 7.99-3.45 3.81-1.58 4.6-1.85 5.12-1.86.11 0 .37.03.54.17.14.12.18.28.2.45-.01.07-.01.18-.03.32z"/></svg></span>
+              المتابعة باستخدام تيليجرام
+            </button>
+          </div>
+
+          <div id="dzAuthRegEmailView" hidden>
+            <p class="dz-auth-subtitle">إنشاء حساب عبر البريد الإلكتروني (Gmail)</p>
+            <form id="dzAuthRegEmailForm">
+              <input type="email" id="dzAuthRegEmail" class="dz-auth-input" placeholder="أدخل بريدك الإلكتروني (Gmail)" required />
+              <input type="text" id="dzAuthRegUser" class="dz-auth-input" placeholder="اسم المستخدم (اختياري)" />
+              <input type="password" id="dzAuthRegPass" class="dz-auth-input" placeholder="كلمة المرور (6 أحرف فأكثر)" minlength="6" required />
+              <button type="submit" class="dz-auth-btn-primary">إرسال رمز التحقق للجيمايل</button>
+            </form>
+          </div>
+
+          <div id="dzAuthVerifyEmailView" hidden>
+            <p class="dz-auth-subtitle">أدخل الرمز الذي وصلك في بريد Gmail</p>
+            <form id="dzAuthVerifyEmailForm">
+              <input type="text" id="dzAuthEmailOtp" class="dz-auth-input" placeholder="رمز التحقق (6 أرقام)" maxlength="6" required />
+              <button type="submit" class="dz-auth-btn-primary">تفعيل الحساب والدخول</button>
+            </form>
+          </div>
+
+          <div id="dzAuthRegTgView" hidden>
+            <p class="dz-auth-subtitle">1. افتح البوت واضغط <b>Start (بدء)</b> في تيليجرام<br>2. ثم عد واختر كلمة مرور لحسابك</p>
+            <a id="dzAuthTgBotLink" href="#" target="_blank" class="dz-auth-btn-outline" style="border-color:#2AABEE;color:#2AABEE;">
+              <span class="dz-auth-btn-ico">✈️</span> فتح بوت تيليجرام للربط
+            </a>
+            <form id="dzAuthCompleteTgForm" style="margin-top:12px;">
+              <input type="text" id="dzAuthTgUser" class="dz-auth-input" placeholder="اسم مستخدم للدخول (مثلاً: ahmed12)" required />
+              <input type="email" id="dzAuthTgOptEmail" class="dz-auth-input" placeholder="بريد Gmail إضافي للاستعادة (اختياري)" />
+              <input type="password" id="dzAuthTgPass" class="dz-auth-input" placeholder="اختر كلمة المرور" minlength="6" required />
+              <button type="submit" class="dz-auth-btn-primary">إكمال التسجيل والدخول</button>
+            </form>
+          </div>
+
+          <div id="dzAuthForgot1View" hidden>
+            <p class="dz-auth-subtitle">أدخل حسابك واختر أين تريد استلام رمز الاستعادة</p>
+            <form id="dzAuthForgot1Form">
+              <input type="text" id="dzAuthForgotId" class="dz-auth-input" placeholder="البريد الإلكتروني أو اسم المستخدم" required />
+              <div class="dz-auth-choice-group">
+                <div class="dz-auth-choice-card active" id="dzAuthChoiceEmail" onclick="dzAuthSelectMethod('email')">📧 عبر Gmail</div>
+                <div class="dz-auth-choice-card" id="dzAuthChoiceTg" onclick="dzAuthSelectMethod('telegram')">✈️ عبر تيليجرام</div>
+              </div>
+              <button type="submit" class="dz-auth-btn-primary">إرسال رمز الاستعادة</button>
+            </form>
+          </div>
+
+          <div id="dzAuthForgot2View" hidden>
+            <p class="dz-auth-subtitle">أدخل الرمز الذي وصلك وكلمة المرور الجديدة</p>
+            <form id="dzAuthForgot2Form">
+              <input type="text" id="dzAuthResetOtp" class="dz-auth-input" placeholder="رمز الاستعادة (6 أرقام)" maxlength="6" required />
+              <input type="password" id="dzAuthNewPass" class="dz-auth-input" placeholder="كلمة المرور الجديدة" minlength="6" required />
+              <input type="password" id="dzAuthConfirmPass" class="dz-auth-input" placeholder="تأكيد كلمة المرور الجديدة" minlength="6" required />
+              <button type="submit" class="dz-auth-btn-primary">تبديل كلمة المرور والدخول</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="dz-auth-bottom">
+          <a id="dzAuthBottomSignup" class="dz-auth-signup-link" onclick="dzAuthShowView('dzAuthRegEmailView')">إنشاء حساب</a>
+          <div class="dz-auth-footer-note">
+            من خلال الاستمرار في استخدام حساب موجود في <a href="#">DZ_CHAT</a>، فإنك توافق على
+            <a href="#">شروط الخدمة</a> لدينا وتقر بأنك قد قرأت <a href="#">سياسة الخصوصية</a>.
+          </div>
+        </div>
       </div>
     </div>
 
