@@ -286,35 +286,50 @@ function parseMsgPayload(content) {
   }
   return { kind: "text", text: content, react: "", edited: false };
 }
+const DZ_API_URL = "https://dz-chat-auth.onrender.com";
+const DZ_BOT_USERNAME = "Bob43_bot";
 
-const authScreen = document.createElement("div");
-authScreen.id = "dzAuth";
-authScreen.innerHTML = `<div class="auth-card"><div class="auth-logo-wrap"><img src="./icon.png" alt="DZ" onerror="this.remove();this.parentNode.textContent='🇩🇿'"></div><h2>DZ-CHAT</h2><p class="auth-sub">سجّل باسم المستخدم وكلمة المرور فقط بدون تعقيدات</p><form id="dzLoginForm"><input id="dzEmail" type="text" placeholder="اسم المستخدم" required minlength="3" autocomplete="username"><div class="auth-pass-wrap"><input id="dzPassword" type="password" placeholder="كلمة المرور" required minlength="6" autocomplete="current-password"><button type="button" class="auth-eye-btn" data-eye="dzPassword" title="إظهار">${SVG_ICONS.eye}</button></div><button class="auth-main" type="submit">تسجيل الدخول</button></form><form id="dzRegisterForm" hidden><input id="dzName" type="text" placeholder="اسم المستخدم" required minlength="3" autocomplete="username"><div class="auth-pass-wrap"><input id="dzNewPassword" type="password" placeholder="كلمة المرور (6 أحرف على الأقل)" required minlength="6" autocomplete="new-password"><button type="button" class="auth-eye-btn" data-eye="dzNewPassword" title="إظهار">${SVG_ICONS.eye}</button></div><button class="auth-main" type="submit">إنشاء حساب جديد</button></form><button type="button" class="auth-switch" id="dzSwitch">ليس لديك حساب؟ أنشئ حساباً جديداً</button><div class="auth-message" id="dzAuthMessage"></div></div>`;
-document.body.appendChild(authScreen);
-
-authScreen.querySelectorAll(".auth-eye-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const inp = $(btn.dataset.eye); if (!inp) return;
-    const show = inp.type === "password";
-    inp.type = show ? "text" : "password";
-    btn.innerHTML = show ? SVG_ICONS.eyeOff : SVG_ICONS.eye;
-  });
-});
-
+const authScreen = $("dzAuthOverlay");
 const app = document.querySelector(".app"), pages = document.querySelectorAll(".page"), navItems = document.querySelectorAll(".nav-item");
-function showApp() { authScreen.style.display = "none"; app.style.display = ""; refreshNotifyBtnVisibility(); }
+let dzActiveId = "", dzRecoveryMethod = "email", dzTgToken = "";
+
+function dzAuthMsg(txt, type) {
+  const el = $("dzAuthStatusMsg"); if (!el) return;
+  el.textContent = txt; el.className = "dz-auth-msg " + (type || "");
+}
+function authMessage(msg, error = false) { dzAuthMsg(msg, error ? "error" : "success"); }
+
+function dzAuthShowView(id) {
+  ["dzAuthLoginView", "dzAuthRegEmailView", "dzAuthVerifyEmailView", "dzAuthRegTgView", "dzAuthForgot1View", "dzAuthForgot2View"]
+    .forEach(v => { if ($(v)) $(v).hidden = (v !== id); });
+  if ($("dzAuthBottomSignup")) $("dzAuthBottomSignup").hidden = (id !== "dzAuthLoginView");
+  dzAuthMsg("", "");
+}
+function dzAuthSelectMethod(m) {
+  dzRecoveryMethod = m;
+  $("dzAuthChoiceEmail")?.classList.toggle("active", m === "email");
+  $("dzAuthChoiceTg")?.classList.toggle("active", m === "telegram");
+}
+async function dzAuthReq(path, body) {
+  dzAuthMsg("جاري الاتصال بالسيرفر، يرجى الانتظار...", "success");
+  const r = await fetch(DZ_API_URL + path, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.message || "حدث خطأ غير متوقع");
+  return d;
+}
+
+function showApp() { if (authScreen) authScreen.style.display = "none"; app.style.display = ""; refreshNotifyBtnVisibility(); }
 function showAuth() {
   leaveLiveRoom(true); closePrivateChat(); closeUserProfile(); $("dzChatSettingsModal").hidden = true; $("dzAdminModal").hidden = true;
   currentUser = null; currentProfile = null; onlineUserIds = new Set(); initialRoomsLoaded = false; knownLiveRoomIds.clear();
   db.removeAllChannels(); presenceChannel = null; realtimeChannel = null;
   document.querySelectorAll("video").forEach(v => v.pause());
-  app.style.display = "none"; authScreen.style.display = "flex"; refreshNotifyBtnVisibility();
+  app.style.display = "none"; if (authScreen) authScreen.style.display = "block";
+  dzAuthShowView("dzAuthLoginView"); refreshNotifyBtnVisibility();
 }
-let registerMode = false;
-$("dzSwitch").addEventListener("click", () => {
-  registerMode = !registerMode; $("dzLoginForm").hidden = registerMode; $("dzRegisterForm").hidden = !registerMode;
-  $("dzSwitch").textContent = registerMode ? "لديك حساب؟ سجل الدخول" : "ليس لديك حساب؟ أنشئ حساباً جديداً"; authMessage("");
-});
+
 function usernameToAuthEmail(input) {
   const raw = (input || "").trim();
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return raw.toLowerCase();
@@ -324,6 +339,7 @@ function usernameToAuthEmail(input) {
   for (let i = 0; i < clean.length; i++) { const c = clean.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619) >>> 0; h2 = (((h2 << 5) + h2) ^ c) >>> 0; }
   return "u_" + h1.toString(36) + h2.toString(36) + "@dzchat.com";
 }
+
 async function ensureProfile(user) {
   const { data, error } = await db.from("profiles").select("*").eq("id", user.id).maybeSingle();
   if (error) throw error; if (data) return data;
@@ -331,25 +347,106 @@ async function ensureProfile(user) {
   const { data: ins, error: iErr } = await db.from("profiles").upsert({ id: user.id, username, bio: "عضو في مجتمع DZ-CHAT", country: "الجزائر", avatar_url: null }, { onConflict: "id" }).select().single();
   if (iErr) throw iErr; return ins;
 }
-$("dzLoginForm").addEventListener("submit", async e => {
+
+function dzAuthStartTelegram() {
+  dzTgToken = "reg_" + Math.random().toString(36).substring(2, 10);
+  if ($("dzAuthTgBotLink")) $("dzAuthTgBotLink").href = `https://t.me/${DZ_BOT_USERNAME}?start=${dzTgToken}`;
+  dzAuthShowView("dzAuthRegTgView");
+}
+function dzAuthOpenTelegramLink() {
+  if (!currentUser) return showToast("يرجى تسجيل الدخول أولاً");
+  $("dzProfileMenuModal").hidden = true;
+  window.open(`https://t.me/${DZ_BOT_USERNAME}?start=link_${encodeURIComponent(currentUser.id)}`, "_blank");
+  showToast("اضغط على البدء (Start) في بوت تيليجرام لإكمال الربط ✈️");
+}
+
+$("dzAuthLoginForm")?.addEventListener("submit", async e => {
   e.preventDefault(); if (!checkRateLimit("auth", 1200)) return;
-  const btn = e.submitter, raw = $("dzEmail").value.trim(), password = $("dzPassword").value;
-  if (raw.replace(/^@+/, "").length < 3) { authMessage("اسم المستخدم يجب أن يكون 3 أحرف على الأقل", true); return; }
+  const btn = e.submitter, raw = $("dzAuthLoginId").value.trim(), password = $("dzAuthLoginPass").value;
+  if (raw.replace(/^@+/, "").length < 3) return dzAuthMsg("يجب أن يكون البريد أو اسم المستخدم 3 أحرف على الأقل", "error");
   btn.disabled = true; btn.textContent = "جارٍ الدخول...";
-  try { const { data, error } = await db.auth.signInWithPassword({ email: usernameToAuthEmail(raw), password }); if (error) throw error; await loadUser(data.user); }
-  catch (err) { authMessage((err.message || "").includes("Invalid login credentials") ? "اسم المستخدم أو كلمة المرور غير صحيحة." : "تعذر تسجيل الدخول: " + err.message, true); }
-  finally { btn.disabled = false; btn.textContent = "تسجيل الدخول"; }
-});
-$("dzRegisterForm").addEventListener("submit", async e => {
-  e.preventDefault(); if (!checkRateLimit("auth", 1200)) return;
-  const username = cleanText($("dzName").value.replace(/^@+/, ""), 30), password = $("dzNewPassword").value, btn = e.submitter;
-  if (username.length < 3) { authMessage("اسم المستخدم يجب أن يكون 3 أحرف على الأقل", true); return; }
-  btn.disabled = true; btn.textContent = "جارٍ الإنشاء...";
   try {
-    const { data, error } = await db.auth.signUp({ email: usernameToAuthEmail(username), password, options: { data: { username, display_name: username } } });
-    if (error) throw error; if (data.session) await loadUser(data.user); else authMessage("أوقف Confirm email في Supabase للدخول المباشر.", true);
-  } catch (err) { authMessage((err.message || "").includes("User already registered") ? "اسم المستخدم مستخدم بالفعل." : "تعذر إنشاء الحساب: " + err.message, true); }
-  finally { btn.disabled = false; btn.textContent = "إنشاء حساب جديد"; }
+    let { data, error } = await db.auth.signInWithPassword({ email: usernameToAuthEmail(raw), password });
+    if (error && !raw.includes("@")) {
+      const res = await dzAuthReq("/api/login-username", { username: raw.replace(/^@+/, ""), password });
+      if (res.session) {
+        const sRes = await db.auth.setSession(res.session);
+        if (sRes.error) throw sRes.error;
+        data = sRes.data; error = null;
+      }
+    }
+    if (error) throw error;
+    await loadUser(data.user);
+  } catch (err) {
+    dzAuthMsg((err.message || "").includes("Invalid login") ? "بيانات الدخول أو كلمة المرور غير صحيحة" : err.message, "error");
+  } finally { btn.disabled = false; btn.textContent = "تسجيل الدخول"; }
+});
+
+$("dzAuthRegEmailForm")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  dzActiveId = $("dzAuthRegEmail").value.trim().toLowerCase();
+  const username = cleanText($("dzAuthRegUser").value.replace(/^@+/, ""), 30);
+  const password = $("dzAuthRegPass").value;
+  const btn = e.submitter; btn.disabled = true;
+  try {
+    await dzAuthReq("/api/register-email", { email: dzActiveId, username, password });
+    dzAuthShowView("dzAuthVerifyEmailView");
+    dzAuthMsg("تم إرسال رمز التحقق إلى بريد Gmail الخاص بك", "success");
+  } catch (err) { dzAuthMsg(err.message, "error"); }
+  finally { btn.disabled = false; }
+});
+
+$("dzAuthVerifyEmailForm")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = e.submitter; btn.disabled = true;
+  try {
+    const res = await dzAuthReq("/api/verify-email", { email: dzActiveId, otp: $("dzAuthEmailOtp").value.trim() });
+    const { data, error } = await db.auth.signInWithPassword({ email: res.email, password: $("dzAuthRegPass").value });
+    if (error) throw error;
+    await loadUser(data.user);
+  } catch (err) { dzAuthMsg(err.message, "error"); }
+  finally { btn.disabled = false; }
+});
+
+$("dzAuthCompleteTgForm")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  const username = cleanText($("dzAuthTgUser").value.replace(/^@+/, ""), 30);
+  const email = $("dzAuthTgOptEmail").value.trim().toLowerCase();
+  const password = $("dzAuthTgPass").value;
+  if (username.length < 3) return dzAuthMsg("اسم المستخدم يجب أن يكون 3 أحرف على الأقل", "error");
+  const btn = e.submitter; btn.disabled = true;
+  try {
+    const res = await dzAuthReq("/api/register-telegram", { tgSessionToken: dzTgToken, username, authEmail: email || usernameToAuthEmail(username), recoveryEmail: email || null, password });
+    const { data, error } = await db.auth.signInWithPassword({ email: res.email, password });
+    if (error) throw error;
+    await loadUser(data.user);
+  } catch (err) { dzAuthMsg(err.message, "error"); }
+  finally { btn.disabled = false; }
+});
+
+$("dzAuthForgot1Form")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  dzActiveId = $("dzAuthForgotId").value.trim();
+  const btn = e.submitter; btn.disabled = true;
+  try {
+    await dzAuthReq("/api/forgot-password", { identifier: dzActiveId, method: dzRecoveryMethod });
+    dzAuthShowView("dzAuthForgot2View");
+    dzAuthMsg(dzRecoveryMethod === "email" ? "تم إرسال الرمز إلى بريد Gmail" : "تم إرسال الرمز إلى حسابك في تيليجرام", "success");
+  } catch (err) { dzAuthMsg(err.message, "error"); }
+  finally { btn.disabled = false; }
+});
+
+$("dzAuthForgot2Form")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  const np = $("dzAuthNewPass").value;
+  if (np !== $("dzAuthConfirmPass").value) return dzAuthMsg("كلمتا المرور غير متطابقتين", "error");
+  const btn = e.submitter; btn.disabled = true;
+  try {
+    await dzAuthReq("/api/reset-password", { identifier: dzActiveId, otp: $("dzAuthResetOtp").value.trim(), newPassword: np });
+    dzAuthShowView("dzAuthLoginView");
+    dzAuthMsg("تم تبديل كلمة المرور بنجاح! يمكنك تسجيل الدخول الآن.", "success");
+  } catch (err) { dzAuthMsg(err.message, "error"); }
+  finally { btn.disabled = false; }
 });
 async function refreshAllData(redrawFeed = true) {
   const [pRes, vRes, lRes, cRes, fRes, rRes, mRes] = await Promise.all([
